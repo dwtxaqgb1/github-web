@@ -201,7 +201,7 @@ pre.log{background:#050b17;border:1px solid #1e293b;border-radius:8px;padding:14
 .upload-progress .info .pct{font-weight:700;font-size:14px;color:#60a5fa}
 
 .modal-editor{flex:1;display:none;flex-direction:column;background:#050b17;min-height:0;overflow:hidden}
-.modal-editor.show{display:flex;min-height:70vh}
+.modal-editor.show{display:flex;position:fixed;inset:0;z-index:400;height:100vh;width:100vw;background:#050b17}
 .modal-editor .editor-toolbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card2);gap:10px;flex-wrap:wrap;flex-shrink:0}
 .modal-editor .editor-path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#93c5fd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .modal-editor .editor-actions{display:flex;gap:8px;flex-shrink:0}
@@ -244,9 +244,123 @@ pre.log{background:#050b17;border:1px solid #1e293b;border-radius:8px;padding:14
 .readme-dialog-actions{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border);background:var(--card2);flex-shrink:0}
 .readme-dialog-actions button{flex:1;margin:0}
 @media(max-width:640px){.readme-dialog-body textarea{min-height:55vh;font-size:12.5px}}
+
+.prompt-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);animation:fadeIn .15s ease;overflow-y:auto}
+.prompt-box{background:var(--card);border:1px solid var(--border);border-radius:14px;width:100%;max-width:560px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.6);animation:popIn .15s ease;margin:auto}
+.prompt-title{padding:18px 60px;border-bottom:1px solid var(--border);font-weight:600;font-size:16px;color:#e2e8f0;letter-spacing:.2px}
+.prompt-message{padding:18px 60px 0;font-size:15px;color:#cbd5e1;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.prompt-input{margin:16px 60px 0;padding:13px 16px;background:#0f172a;border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:15px;font-family:inherit;outline:none;width:calc(100% - 120px);transition:border-color .15s}
+.prompt-input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.prompt-hint{padding:12px 60px 0;font-size:13px;color:var(--muted);line-height:1.7;white-space:pre-wrap;word-break:break-all}
+.prompt-actions{display:flex;gap:12px;padding:20px 60px 18px}
+.prompt-actions button{flex:1;margin:0;padding:12px 18px;font-size:15px}
+@media(max-width:640px){
+  .prompt-overlay{padding:14px}
+  .prompt-box{max-width:100%}
+  .prompt-title{padding:16px 48px;font-size:15.5px}
+  .prompt-message{padding:16px 48px 0;font-size:14.5px}
+  .prompt-input{margin:14px 48px 0;width:calc(100% - 96px);padding:12px 14px;font-size:15px}
+  .prompt-hint{padding:10px 48px 0;font-size:12.5px}
+  .prompt-actions{padding:16px 48px 14px;gap:10px}
+  .prompt-actions button{padding:11px 16px;font-size:14.5px}
+}
+
+.modal-editor .CodeMirror{flex:1;height:100% !important;width:100%;font-size:13px;line-height:1.6;background:#050b17}
+.modal-editor .CodeMirror-scroll{min-height:100%}
+.modal-editor .CodeMirror-lines{padding:8px 0}
+.modal-editor .CodeMirror pre.CodeMirror-line{padding:0 14px}
+.modal-editor .CodeMirror-gutters{background:#0b1220;border-right:1px solid #1e293b}
+@media(max-width:640px){.modal-editor .CodeMirror{font-size:12.5px}}
+
+/* 查找替换面板 */
+#cmFindPanel{position:fixed;left:0;right:0;bottom:0;background:#0b1220;border-top:1px solid #25334f;padding:10px 12px 12px;z-index:450;display:none;box-shadow:0 -4px 20px rgba(0,0,0,.5);font-size:13px}
+#cmFindPanel.show{display:block}
+#cmFindPanel .find-row,#cmFindPanel .replace-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+#cmFindPanel input[type=text]{flex:1;padding:8px 10px;background:#0f172a;border:1px solid #25334f;border-radius:6px;color:#e2e8f0;font-size:13px;font-family:inherit;outline:none;min-width:0}
+#cmFindPanel input[type=text]:focus{border-color:#3b82f6}
+#cmFindPanel button{padding:7px 12px;font-size:12.5px;background:#1e293b;color:#cbd5e1;border:1px solid #25334f;border-radius:6px;cursor:pointer;margin:0;line-height:1.2;flex-shrink:0;font-family:inherit}
+#cmFindPanel button:hover{background:#334155}
+#cmFindPanel button.primary{background:#3b82f6;color:#fff;border-color:#3b82f6}
+#cmFindPanel button.primary:hover{background:#2563eb}
+#cmFindPanel .count{color:#93c5fd;font-size:12px;min-width:52px;text-align:center;flex-shrink:0}
+#cmFindPanel .status{margin-top:4px;font-size:12px;color:#34d399;min-height:16px}
+#cmFindPanel .status.err{color:#f87171}
+#cmFindPanel .btn-group{display:flex;gap:6px;flex-shrink:0}
+
+/* CodeMirror 匹配高亮 */
+.cm-match-all{background:#fbbf24 !important;color:#1a1a1a !important;border-radius:2px}
+.cm-match-current{background:#3b82f6 !important;color:#ffffff !important;border-radius:2px}
+.cm-replaced{background:#10b981 !important;color:#ffffff !important;border-radius:2px}
+.cm-match-all *,.cm-match-current *,.cm-replaced *{color:inherit !important}
+
+/* 编辑器底部位移 */
+.modal-editor.show{padding-bottom:0;transition:padding-bottom .15s}
+.modal-editor.show.find-open{padding-bottom:135px}
+
+@media(max-width:640px){
+  #cmFindPanel{padding:8px 10px 10px;font-size:12.5px}
+  #cmFindPanel .find-row,#cmFindPanel .replace-row{gap:5px}
+  #cmFindPanel button{padding:6px 9px;font-size:12px}
+  #cmFindPanel input[type=text]{padding:7px 9px;font-size:12.5px}
+  .modal-editor.show.find-open{padding-bottom:155px}
+}
+
+.upload-body{padding:14px 20px;overflow:auto;max-height:60vh}
+.upload-body input[type=file]{display:block;width:100%;padding:12px;background:#0f172a;border:2px dashed #334155;border-radius:8px;color:#cbd5e1;cursor:pointer;font-family:inherit}
+.upload-file-item{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-top:8px;background:#0f172a;border:1px solid #1e293b;border-radius:6px;font-size:13px}
+.upload-file-item .fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e2e8f0}
+.upload-file-item .fs{color:#64748b;font-size:11.5px;flex-shrink:0}
+.upload-file-item.over{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3)}
+.upload-file-item.over .fs{color:#f87171}
+.file-list .fitem .fdel{background:transparent;border:1px solid #ef4444;color:#f87171;cursor:pointer;border-radius:6px;padding:3px 10px;font-size:13px;line-height:1.2;margin:0 0 0 4px;flex-shrink:0}
+.file-list .fitem .fdel:hover{background:#ef4444;color:#fff}
+
+.upload-progress-bar{height:6px;background:#1e293b;border-radius:3px;overflow:hidden;margin-top:10px;display:none}
+.upload-progress-bar.show{display:block}
+.upload-progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#60a5fa);transition:width .15s ease}
+.upload-progress-text{margin-top:6px;font-size:12px;color:#93c5fd;display:none}
+.upload-progress-text.show{display:block}
+.toast-box{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:rgba(16,185,129,.95);color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:0;transition:opacity .3s,transform .3s;pointer-events:none;max-width:90vw;text-align:center;word-break:break-all}
+.toast-box.show{opacity:1}
+.toast-box.err{background:rgba(239,68,68,.95)}
+.toast-box.info{background:rgba(59,130,246,.95)}
+
+.upload-progress-bar.submitting .bar{width:100% !important;background:linear-gradient(90deg,#3b82f6,#60a5fa,#3b82f6);background-size:200% 100%;animation:barShine 1.5s linear infinite}
+@keyframes barShine{0%{background-position:200% 0}100%{background-position:-200% 0}}
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/codemirror/codemirror.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/codemirror/theme/dracula.min.css') }}">
+<script src="{{ url_for('static', filename='vendor/codemirror/codemirror.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/addon/edit/closebrackets.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/addon/edit/matchbrackets.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/addon/selection/active-line.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/addon/search/searchcursor.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/markdown.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/javascript.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/json.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/python.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/xml.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/css.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/htmlmixed.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/yaml.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/shell.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/dockerfile.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/go.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/clike.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/codemirror/mode/sql.min.js') }}"></script>
 </head>
 <body>
+<script>
+window.onerror = function(msg, url, line, col, err) {
+  try {
+    var div = document.createElement('div');
+    div.id = 'jsErrorBar';
+    div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#7f1d1d;color:#fff;padding:10px 14px;z-index:99999;font-size:12.5px;line-height:1.5;font-family:monospace;word-break:break-all';
+    div.textContent = 'JS 错误 [行 ' + line + ':' + col + '] ' + msg;
+    document.body.appendChild(div);
+  } catch (e) {}
+};
+</script>
 <div class="topbar">
   <h1>GitHub 发布工具</h1>
   <nav>
@@ -284,6 +398,7 @@ pre.log{background:#050b17;border:1px solid #1e293b;border-radius:8px;padding:14
       <div class="editor-toolbar">
         <span class="editor-path" id="editorPath"></span>
         <span class="editor-actions">
+          <button class="ghost" type="button" onclick="cmOpenFind()" id="cmFindBtn" style="border-color:#60a5fa;color:#60a5fa">查找/替换</button>
           <button class="ghost" type="button" onclick="cancelEdit()">取消</button>
           <button type="button" onclick="saveEdit()" id="saveEditBtn">保存</button>
         </span>
@@ -349,26 +464,271 @@ function showEditBtn(show) {
   if (b) b.style.display = show ? 'inline-block' : 'none';
 }
 
+function guessModeByPath(path) {
+  var p = (path || '').toLowerCase();
+  if (p.endsWith('.md') || p.endsWith('.markdown')) return 'markdown';
+  if (p.endsWith('.json')) return {name: 'javascript', json: true};
+  if (p.endsWith('.ts') || p.endsWith('.tsx') || p.endsWith('.jsx') || p.endsWith('.js') || p.endsWith('.mjs') || p.endsWith('.cjs')) return 'javascript';
+  if (p.endsWith('.py')) return 'python';
+  if (p.endsWith('.html') || p.endsWith('.htm')) return 'htmlmixed';
+  if (p.endsWith('.xml')) return 'xml';
+  if (p.endsWith('.css')) return 'css';
+  if (p.endsWith('.yaml') || p.endsWith('.yml')) return 'yaml';
+  if (p.endsWith('.sh') || p.endsWith('.bash')) return 'shell';
+  if (p === 'dockerfile' || p.endsWith('/dockerfile') || p.endsWith('.dockerfile')) return 'dockerfile';
+  if (p.endsWith('.go')) return 'go';
+  if (p.endsWith('.java') || p.endsWith('.c') || p.endsWith('.cpp') || p.endsWith('.h') || p.endsWith('.hpp') || p.endsWith('.cs') || p.endsWith('.kt')) return 'clike';
+  if (p.endsWith('.sql')) return 'sql';
+  return null;
+}
+
+
+var _cmFindState = {matches: [], current: -1};
+
+function cmOpenFind() {
+  if (!_cmEditor) return;
+  var panel = document.getElementById('cmFindPanel');
+  panel.classList.add('show');
+  var editor = document.getElementById('modalEditor');
+  if (editor) editor.classList.add('find-open');
+  setTimeout(function() {
+    if (_cmEditor) { _cmEditor.refresh(); }
+    document.getElementById('cmFindInput').focus();
+    document.getElementById('cmFindInput').select();
+  }, 60);
+}
+
+function cmCloseFind() {
+  var panel = document.getElementById('cmFindPanel');
+  panel.classList.remove('show');
+  var editor = document.getElementById('modalEditor');
+  if (editor) editor.classList.remove('find-open');
+  cmClearAllMarks();
+  document.getElementById('cmFindInput').value = '';
+  document.getElementById('cmReplaceInput').value = '';
+  document.getElementById('cmFindCount').textContent = '';
+  document.getElementById('cmReplaceStatus').textContent = '';
+  setTimeout(function() { if (_cmEditor) { _cmEditor.refresh(); _cmEditor.focus(); } }, 60);
+}
+
+function cmClearAllMarks() {
+  if (_cmEditor) {
+    try { _cmEditor.getAllMarks().forEach(function(m) { m.clear(); }); } catch (e) {}
+  }
+  _cmFindState.matches = [];
+  _cmFindState.current = -1;
+}
+
+function cmClearHighlightsOnly() {
+  if (_cmEditor) {
+    try {
+      _cmEditor.getAllMarks().forEach(function(m) {
+        var cls = m.className || '';
+        if (cls.indexOf('cm-match-all') >= 0 || cls.indexOf('cm-match-current') >= 0) {
+          m.clear();
+        }
+      });
+    } catch (e) {}
+  }
+}
+
+function cmRunSearch() {
+  if (!_cmEditor) return;
+  var query = document.getElementById('cmFindInput').value;
+  cmClearHighlightsOnly();
+  _cmFindState.matches = [];
+  _cmFindState.current = -1;
+  document.getElementById('cmReplaceStatus').textContent = '';
+  if (!query) {
+    document.getElementById('cmFindCount').textContent = '';
+    return;
+  }
+  try {
+    var cursor = _cmEditor.getSearchCursor(query, {line: 0, ch: 0}, {caseFold: true});
+    while (cursor.findNext()) {
+      var from = cursor.from();
+      var to = cursor.to();
+      var mark = _cmEditor.markText(from, to, {className: 'cm-match-all'});
+      _cmFindState.matches.push({from: from, to: to, mark: mark});
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  if (_cmFindState.matches.length > 0) {
+    _cmFindState.current = 0;
+    cmHighlightCurrent();
+  } else {
+    document.getElementById('cmFindCount').textContent = '无匹配';
+  }
+}
+
+function cmHighlightCurrent() {
+  if (!_cmEditor) return;
+  _cmFindState.matches.forEach(function(m, i) {
+    try { m.mark.clear(); } catch (e) {}
+    var cls = (i === _cmFindState.current) ? 'cm-match-current' : 'cm-match-all';
+    m.mark = _cmEditor.markText(m.from, m.to, {className: cls});
+  });
+  var cur = _cmFindState.matches[_cmFindState.current];
+  if (cur) {
+    try {
+      _cmEditor.setSelection(cur.from, cur.to);
+      _cmEditor.scrollIntoView({from: cur.from, to: cur.to}, 80);
+    } catch (e) {}
+  }
+  document.getElementById('cmFindCount').textContent =
+    (_cmFindState.current + 1) + '/' + _cmFindState.matches.length;
+}
+
+function cmFindNext() {
+  if (_cmFindState.matches.length === 0) return;
+  _cmFindState.current = (_cmFindState.current + 1) % _cmFindState.matches.length;
+  cmHighlightCurrent();
+}
+
+function cmFindPrev() {
+  if (_cmFindState.matches.length === 0) return;
+  _cmFindState.current = (_cmFindState.current - 1 + _cmFindState.matches.length) % _cmFindState.matches.length;
+  cmHighlightCurrent();
+}
+
+async function cmReplaceOne() {
+  if (!_cmEditor) return;
+  if (_cmFindState.current < 0 || _cmFindState.matches.length === 0) {
+    document.getElementById('cmReplaceStatus').textContent = '没有匹配项';
+    document.getElementById('cmReplaceStatus').className = 'status err';
+    return;
+  }
+  var replace = document.getElementById('cmReplaceInput').value;
+  var m = _cmFindState.matches[_cmFindState.current];
+  var ok = await myConfirm({
+    title: '确认替换',
+    message: '确定将这一处替换为：\n\n' + (replace || '(空)'),
+    okText: '替换'
+  });
+  if (!ok) return;
+
+  var from = m.from;
+  _cmEditor.replaceRange(replace, m.from, m.to, '+find-replace');
+  var newTo = {line: from.line, ch: from.ch + replace.length};
+  _cmEditor.markText(from, newTo, {className: 'cm-replaced'});
+
+  // 重新查找
+  cmRunSearch();
+  var st = document.getElementById('cmReplaceStatus');
+  st.textContent = '✅ 已替换 1 处';
+  st.className = 'status';
+}
+
+async function cmReplaceAll() {
+  if (!_cmEditor) return;
+  if (_cmFindState.matches.length === 0) {
+    document.getElementById('cmReplaceStatus').textContent = '没有匹配项';
+    document.getElementById('cmReplaceStatus').className = 'status err';
+    return;
+  }
+  var replace = document.getElementById('cmReplaceInput').value;
+  var n = _cmFindState.matches.length;
+  var ok = await myConfirm({
+    title: '确认全部替换',
+    message: '共找到 ' + n + ' 处匹配，\n确定全部替换为：\n\n' + (replace || '(空)'),
+    okText: '全部替换'
+  });
+  if (!ok) return;
+
+  // 从后往前替换，避免位置偏移
+  var sorted = _cmFindState.matches.slice().sort(function(a, b) {
+    if (a.from.line !== b.from.line) return b.from.line - a.from.line;
+    return b.from.ch - a.from.ch;
+  });
+  var count = 0;
+  sorted.forEach(function(m) {
+    try {
+      _cmEditor.replaceRange(replace, m.from, m.to, '+find-replace-all');
+      var newTo = {line: m.from.line, ch: m.from.ch + replace.length};
+      _cmEditor.markText(m.from, newTo, {className: 'cm-replaced'});
+      count++;
+    } catch (e) {}
+  });
+
+  _cmFindState.matches = [];
+  _cmFindState.current = -1;
+  document.getElementById('cmFindCount').textContent = '';
+  var st = document.getElementById('cmReplaceStatus');
+  st.textContent = '✅ 已全部替换 ' + count + ' 处';
+  st.className = 'status';
+}
+
+
+function cmRedoReplace() {
+  if (!_cmEditor) return;
+  try { _cmEditor.redo(); } catch (e) {}
+  cmRunSearch();
+  var st = document.getElementById('cmReplaceStatus');
+  st.textContent = '↷ 已重做';
+  st.className = 'status';
+}
+
+function cmUndoReplace() {
+  if (!_cmEditor) return;
+  _cmEditor.undo();
+  cmRunSearch();
+  var st = document.getElementById('cmReplaceStatus');
+  st.textContent = '↶ 已撤回上一步';
+  st.className = 'status';
+}
+
 function startEditFromPreview() {
   if (!window._lastFileData) return;
   var d = window._lastFileData;
   _editCtx = {owner: d.owner, repo: d.repo, path: d.path, sha: d.sha, content: d.content};
+
   document.getElementById('editorPath').textContent = d.path;
-  document.getElementById('editorTextarea').value = d.content;
-  // 切换视图
+  var ta = document.getElementById('editorTextarea');
+  ta.value = d.content;
+
   document.getElementById('modalLog').style.display = 'none';
   document.getElementById('modalFileList').style.display = 'none';
   var ex = document.getElementById('modalExtras');
   if (ex) ex.className = 'modal-extras';
-  document.getElementById('modalSteps').style.display = 'none';
+  var st = document.getElementById('modalSteps');
+  if (st) st.style.display = 'none';
   document.getElementById('modalEditor').className = 'modal-editor show';
   document.getElementById('modalEditBtn').style.display = 'none';
-  // 光标定位
-  var ta = document.getElementById('editorTextarea');
-  ta.focus();
-  ta.setSelectionRange(0, 0);
-}
+  var hb = document.getElementById('modalHistoryBtn');
+  if (hb) hb.style.display = 'none';
 
+  setTimeout(function() {
+    if (typeof CodeMirror !== 'undefined') {
+      if (_cmEditor) {
+        try { _cmEditor.toTextArea(); } catch (e) {}
+        _cmEditor = null;
+      }
+      _cmEditor = CodeMirror.fromTextArea(ta, {
+        lineNumbers: true,
+        mode: guessModeByPath(d.path),
+        theme: 'dracula',
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        styleActiveLine: true,
+        indentUnit: 2,
+        tabSize: 2,
+        lineWrapping: true
+      });
+      setTimeout(function() {
+        if (_cmEditor) {
+          _cmEditor.setSize('100%', '100%');
+          _cmEditor.refresh();
+          _cmEditor.focus();
+          _cmEditor.setCursor(0, 0);
+        }
+      }, 80);
+    } else {
+      ta.focus();
+      try { ta.setSelectionRange(0, 0); } catch (e) {}
+    }
+  }, 30);
+}
 function cancelEdit() {
   document.getElementById('modalEditor').className = 'modal-editor';
   document.getElementById('modalLog').style.display = 'block';
@@ -376,12 +736,17 @@ function cancelEdit() {
 }
 
 async function saveEdit() {
-  var content = document.getElementById('editorTextarea').value;
+  var content = _cmEditor ? _cmEditor.getValue() : document.getElementById('editorTextarea').value;
   if (content === _editCtx.content) {
     cancelEdit();
     return;
   }
-  var message = prompt('提交信息（commit message）：', 'update ' + _editCtx.path);
+  var message = await myPrompt({
+    title: '提交修改',
+    message: _editCtx.path,
+    defaultValue: 'update ' + _editCtx.path,
+    placeholder: 'commit message'
+  });
   if (message === null) return;
   if (!message.trim()) message = 'update ' + _editCtx.path;
 
@@ -413,6 +778,10 @@ async function saveEdit() {
       window._lastFileData.content = content;
     }
     // 回预览
+    if (_cmEditor) {
+      try { _cmEditor.toTextArea(); } catch (e) {}
+      _cmEditor = null;
+    }
     document.getElementById('modalEditor').className = 'modal-editor';
     document.getElementById('modalLog').style.display = 'block';
     showEditBtn(true);
@@ -601,6 +970,345 @@ function backToFilePreview() {
   if (typeof window._reloadPreview === 'function') window._reloadPreview();
 }
 
+
+
+
+function showToast(msg, type) {
+  var el = document.getElementById('toastBox');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toastBox';
+    el.className = 'toast-box';
+    document.body.appendChild(el);
+  }
+  el.className = 'toast-box show' + (type ? (' ' + type) : '');
+  el.textContent = msg;
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(function() {
+    el.className = 'toast-box' + (type ? (' ' + type) : '');
+  }, 2200);
+}
+
+function myConfirm(opts) {
+  opts = opts || {};
+  return new Promise(function(resolve) {
+    var overlay = document.createElement('div');
+    overlay.className = 'prompt-overlay';
+    var box = document.createElement('div');
+    box.className = 'prompt-box';
+    var title = document.createElement('div');
+    title.className = 'prompt-title';
+    title.textContent = opts.title || '确认';
+    box.appendChild(title);
+    if (opts.message) {
+      var msg = document.createElement('div');
+      msg.className = 'prompt-message';
+      msg.textContent = opts.message;
+      box.appendChild(msg);
+    }
+    var actions = document.createElement('div');
+    actions.className = 'prompt-actions';
+    var btnCancel = document.createElement('button');
+    btnCancel.className = 'ghost';
+    btnCancel.type = 'button';
+    btnCancel.textContent = opts.cancelText || '取消';
+    var btnOk = document.createElement('button');
+    btnOk.type = 'button';
+    btnOk.textContent = opts.okText || '确定';
+    actions.appendChild(btnCancel);
+    actions.appendChild(btnOk);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    var closed = false;
+    function close(val) {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onKey);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      resolve(val);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') close(false);
+      else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+    }
+    btnCancel.addEventListener('click', function() { close(false); });
+    btnOk.addEventListener('click', function() { close(true); });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close(false);
+    });
+    document.addEventListener('keydown', onKey);
+    setTimeout(function() { btnOk.focus(); }, 50);
+  });
+}
+
+function myPrompt(opts) {
+  opts = opts || {};
+  return new Promise(function(resolve) {
+    var overlay = document.createElement('div');
+    overlay.className = 'prompt-overlay';
+
+    var box = document.createElement('div');
+    box.className = 'prompt-box';
+
+    var isMobile = window.innerWidth <= 640;
+    var PAD = isMobile ? '16px 24px' : '18px 32px';
+    var PAD_TOP = isMobile ? '16px 24px 0' : '18px 32px 0';
+    var INPUT_MARGIN = isMobile ? '14px 24px 0' : '16px 32px 0';
+    var INPUT_WIDTH = isMobile ? 'calc(100% - 48px)' : 'calc(100% - 64px)';
+    var HINT_PAD = isMobile ? '10px 24px 0' : '12px 32px 0';
+    var ACT_PAD = isMobile ? '16px 24px 14px' : '20px 32px 18px';
+
+    var title = document.createElement('div');
+    title.className = 'prompt-title';
+    title.textContent = opts.title || '输入';
+    title.style.cssText = 'padding:' + PAD + ';border-bottom:1px solid #25334f;font-weight:600;font-size:16px;color:#e2e8f0;letter-spacing:.2px';
+
+    box.appendChild(title);
+
+    if (opts.message) {
+      var msg = document.createElement('div');
+      msg.className = 'prompt-message';
+      msg.textContent = opts.message;
+      msg.style.cssText = 'padding:' + PAD_TOP + ';font-size:15px;color:#cbd5e1;line-height:1.7;white-space:pre-wrap;word-break:break-word';
+      box.appendChild(msg);
+    }
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'prompt-input';
+    input.value = opts.defaultValue || '';
+    input.placeholder = opts.placeholder || '';
+    input.style.cssText = 'margin:' + INPUT_MARGIN + ';padding:13px 16px;background:#0f172a;border:1px solid #25334f;border-radius:10px;color:#e2e8f0;font-size:15px;font-family:inherit;outline:none;width:' + INPUT_WIDTH + ';box-sizing:border-box';
+    box.appendChild(input);
+
+    if (opts.hint) {
+      var hint = document.createElement('div');
+      hint.className = 'prompt-hint';
+      hint.textContent = opts.hint;
+      hint.style.cssText = 'padding:' + HINT_PAD + ';font-size:13px;color:#8b9cba;line-height:1.7;white-space:pre-wrap;word-break:break-all';
+      box.appendChild(hint);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'prompt-actions';
+    actions.style.cssText = 'display:flex;gap:12px;padding:' + ACT_PAD;
+    var btnCancel = document.createElement('button');
+    btnCancel.className = 'ghost';
+    btnCancel.type = 'button';
+    btnCancel.textContent = '取消';
+    var btnOk = document.createElement('button');
+    btnOk.type = 'button';
+    btnOk.textContent = '确定';
+    actions.appendChild(btnCancel);
+    actions.appendChild(btnOk);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    var closed = false;
+    function close(val) {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onKey);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      resolve(val);
+    }
+
+    function onKey(e) {
+      if (e.key === 'Escape') close(null);
+      else if (e.key === 'Enter' && document.activeElement === input) {
+        e.preventDefault();
+        close(input.value);
+      }
+    }
+
+    btnCancel.addEventListener('click', function() { close(null); });
+    btnOk.addEventListener('click', function() { close(input.value); });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close(null);
+    });
+    document.addEventListener('keydown', onKey);
+
+    setTimeout(function() {
+      input.focus();
+      try { input.setSelectionRange(0, input.value.length); } catch (e) {}
+    }, 60);
+  });
+}
+
+var _cmEditor = null;
+
+
+var _uploadCtx = {owner: '', repo: '', dir: '', files: [], currentNames: []};
+var _uploadXHR = null;
+
+function openUploadDialog(owner, repo, dir, currentNames) {
+  _uploadCtx = {owner: owner, repo: repo, dir: dir || '', files: [], currentNames: currentNames || []};
+  document.getElementById('uploadInput').value = '';
+  document.getElementById('uploadFileList').innerHTML = '';
+  document.getElementById('uploadDialogTitle').textContent = '上传文件 · ' + (dir || '根目录');
+  var hint = document.getElementById('uploadHint');
+  hint.textContent = '上传到：' + (dir ? ('/' + dir) : '/') + '\n单文件上限 25 MB。\n⚠️ 大文件（>5MB）会走 GitHub API，速度较慢，请耐心等待。\n如需上传大文件，建议改用首页「发布项目」上传 zip。';
+  hint.style.whiteSpace = 'pre-line';
+  setUploadBtnState();
+  document.getElementById('uploadDialog').style.display = 'flex';
+}
+
+function closeUploadDialog() {
+  if (_uploadXHR) {
+    try { _uploadXHR.abort(); } catch (e) {}
+    _uploadXHR = null;
+  }
+  document.getElementById('uploadDialog').style.display = 'none';
+  document.getElementById('uploadProgressBar').classList.remove('show');
+  document.getElementById('uploadProgressText').classList.remove('show');
+  _uploadCtx.files = [];
+}
+
+function setUploadBtnState() {
+  var btn = document.getElementById('uploadStartBtn');
+  var hasValid = _uploadCtx.files.some(function(f) { return f.size <= 25 * 1024 * 1024; });
+  btn.disabled = !hasValid;
+  btn.style.opacity = hasValid ? '1' : '.5';
+}
+
+function onUploadFilesSelected() {
+  var input = document.getElementById('uploadInput');
+  _uploadCtx.files = Array.from(input.files || []);
+  var box = document.getElementById('uploadFileList');
+  if (!_uploadCtx.files.length) { box.innerHTML = ''; setUploadBtnState(); return; }
+  var html = '';
+  _uploadCtx.files.forEach(function(f) {
+    var over = f.size > 25 * 1024 * 1024;
+    var big = f.size > 5 * 1024 * 1024;
+    var sz = f.size < 1024 ? (f.size + ' B')
+           : (f.size < 1024 * 1024 ? (f.size / 1024).toFixed(1) + ' KB'
+           : (f.size / 1024 / 1024).toFixed(2) + ' MB');
+    var tag = '';
+    if (over) tag = ' · 超限将被拒绝';
+    else if (big) tag = ' · 大文件较慢';
+    html += '<div class="upload-file-item' + (over ? ' over' : '') + '">' +
+      '<span class="fn">' + escHtml(f.name) + '</span>' +
+      '<span class="fs">' + sz + tag + '</span>' +
+      '</div>';
+  });
+  box.innerHTML = html;
+  setUploadBtnState();
+}
+
+async function doUploadFiles() {
+  var valid = _uploadCtx.files.filter(function(f) { return f.size <= 25 * 1024 * 1024; });
+  if (!valid.length) { alert('没有可上传的文件'); return; }
+
+  // 检查同名
+  var same = valid.filter(function(f) {
+    return _uploadCtx.currentNames.indexOf(f.name) >= 0;
+  });
+  var overwrite = 0;
+  if (same.length) {
+    var names = same.map(function(f) { return f.name; }).join('\n');
+    var ok = await myConfirm({
+      title: '文件已存在',
+      message: '以下文件已存在：\n\n' + names + '\n\n是否覆盖？',
+      okText: '覆盖上传'
+    });
+    if (!ok) return;
+    overwrite = 1;
+  }
+
+  var btn = document.getElementById('uploadStartBtn');
+  btn.disabled = true;
+  btn.textContent = '上传中...';
+  var bar = document.getElementById('uploadProgressBar');
+  var barInner = document.getElementById('uploadProgressBarInner');
+  var barText = document.getElementById('uploadProgressText');
+  bar.classList.add('show');
+  barText.classList.add('show');
+  barInner.style.width = '0%';
+  barText.textContent = '准备上传...';
+
+  var fd = new FormData();
+  fd.append('owner', _uploadCtx.owner);
+  fd.append('repo', _uploadCtx.repo);
+  fd.append('dir', _uploadCtx.dir);
+  fd.append('overwrite', overwrite ? '1' : '0');
+  valid.forEach(function(f) { fd.append('files', f); });
+
+  var xhr = new XMLHttpRequest();
+  _uploadXHR = xhr;
+  var startTime = Date.now();
+  xhr.open('POST', '/api/repos/upload_file');
+  xhr.upload.onprogress = function(e) {
+    if (e.lengthComputable) {
+      var pct = Math.round(e.loaded / e.total * 100);
+      barInner.style.width = pct + '%';
+      var mb = (e.loaded / 1024 / 1024).toFixed(2);
+      var totalMb = (e.total / 1024 / 1024).toFixed(2);
+      var elapsed = (Date.now() - startTime) / 1000;
+      var speed = elapsed > 0.3 ? (e.loaded / elapsed / 1024 / 1024).toFixed(1) + ' MB/s' : '';
+      barText.textContent = pct + '%  ' + mb + ' / ' + totalMb + ' MB' + (speed ? '  ·  ' + speed : '');
+    }
+  };
+  xhr.upload.onload = function() {
+    // 客户端到 NAS 上传完成，NAS 正在提交 GitHub
+    bar.classList.add('submitting');
+    barText.textContent = '⏳ 正在提交到 GitHub，请稍候...（文件越大越久）';
+  };
+
+  xhr.onload = function() {
+    try {
+      var j = JSON.parse(xhr.responseText);
+      bar.classList.remove('submitting');
+      if (j.error) { showToast('上传失败: ' + j.error, 'err'); return; }
+      var results = j.results || [];
+      var okCount = results.filter(function(x) { return x.ok; }).length;
+      var failCount = results.filter(function(x) { return !x.ok; }).length;
+      barInner.style.width = '100%';
+      barText.textContent = '完成：成功 ' + okCount + ' 个' + (failCount ? ('，失败 ' + failCount + ' 个') : '');
+      var msg = '上传完成：成功 ' + okCount + ' 个';
+      if (failCount) msg += '，失败 ' + failCount + ' 个';
+      showToast(msg, failCount ? 'err' : '');
+      // 失败详情直接弹给用户看
+      if (failCount) {
+        var failDetail = results.filter(function(x) { return !x.ok; })
+          .map(function(x) { return '• ' + x.name + '\n  ' + x.msg; }).join('\n\n');
+        var okDetail = results.filter(function(x) { return x.ok; })
+          .map(function(x) { return '• ' + x.name + ' — ' + x.msg; }).join('\n');
+        var fullMsg = '';
+        if (failDetail) fullMsg += '❌ 失败：\n' + failDetail;
+        if (okDetail) fullMsg += (fullMsg ? '\n\n' : '') + '✅ 成功：\n' + okDetail;
+        // 用 alert 保证用户能看到（弹窗里的进度条会挡住 toast）
+        setTimeout(function() { alert(fullMsg); }, 300);
+      }
+      setTimeout(function() {
+        closeUploadDialog();
+        if (typeof window._reloadPreview === 'function') window._reloadPreview();
+      }, 800);
+    } catch (e) {
+      showToast('响应解析失败', 'err');
+    }
+  };
+  xhr.onerror = function() {
+    showToast('网络错误', 'err');
+  };
+  xhr.onloadend = function() {
+    _uploadXHR = null;
+    btn.disabled = false;
+    btn.textContent = '上传';
+    bar.classList.remove('submitting');
+    setTimeout(function() {
+      bar.classList.remove('show');
+      barText.classList.remove('show');
+    }, 2000);
+  };
+  xhr.onabort = function() {
+    showToast('已取消上传', 'info');
+  };
+  xhr.send(fd);
+}
+
 function openModal(title, content) {
   document.getElementById('modalTitle').textContent = title || '日志';
   document.getElementById('modalLog').textContent = content || '';
@@ -620,6 +1328,10 @@ function openModal(title, content) {
   if (_up) _up.className = 'upload-progress';
   var _steps = document.getElementById('modalSteps');
   if (_steps) { _steps.style.display = 'none'; _steps.innerHTML = ''; }
+  if (typeof _cmEditor !== 'undefined' && _cmEditor) {
+    try { _cmEditor.toTextArea(); } catch (err) {}
+    _cmEditor = null;
+  }
   var _bb = document.getElementById('modalBackBtn');
   if (_bb) _bb.style.display = 'none';
   var ex = document.getElementById('modalExtras');
@@ -740,6 +1452,50 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="readme-dialog-actions">
       <button class="ghost" type="button" onclick="closeReadmeDialog()">取消</button>
       <button type="button" onclick="saveReadmeToRepo()" id="readmeSaveBtn">保存到仓库</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="cmFindPanel">
+  <div class="find-row">
+    <input type="text" id="cmFindInput" placeholder="查找内容..." oninput="cmRunSearch()">
+    <span class="count" id="cmFindCount"></span>
+    <div class="btn-group">
+      <button type="button" onclick="cmFindPrev()" title="上一个">↑</button>
+      <button type="button" onclick="cmFindNext()" title="下一个">↓</button>
+      <button type="button" onclick="cmCloseFind()" title="关闭">✕</button>
+    </div>
+  </div>
+  <div class="replace-row">
+    <input type="text" id="cmReplaceInput" placeholder="替换为...">
+    <div class="btn-group">
+      <button type="button" onclick="cmReplaceOne()">替换</button>
+      <button type="button" class="primary" onclick="cmReplaceAll()">全部替换</button>
+      <button type="button" onclick="cmUndoReplace()" title="撤回">↶</button>
+      <button type="button" onclick="cmRedoReplace()" title="重做">↷</button>
+    </div>
+  </div>
+  <div class="status" id="cmReplaceStatus"></div>
+</div>
+
+
+<div id="uploadDialog" class="modal-overlay" style="display:none;z-index:210">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-head">
+      <span class="modal-title" id="uploadDialogTitle">上传文件</span>
+      <button class="modal-close" type="button" onclick="closeUploadDialog()">✕</button>
+    </div>
+    <div class="upload-body">
+      <input type="file" id="uploadInput" multiple onchange="onUploadFilesSelected()">
+      <div id="uploadFileList"></div>
+      <div id="uploadHint" style="font-size:12px;color:#8b9cba;margin-top:10px;line-height:1.7"></div>
+      <div class="upload-progress-bar" id="uploadProgressBar"><div class="bar" id="uploadProgressBarInner"></div></div>
+      <div class="upload-progress-text" id="uploadProgressText"></div>
+    </div>
+    <div class="prompt-actions" style="padding:14px 20px 16px">
+      <button class="ghost" type="button" onclick="closeUploadDialog()">取消</button>
+      <button type="button" id="uploadStartBtn" onclick="doUploadFiles()" disabled style="opacity:.5">上传</button>
     </div>
   </div>
 </div>

@@ -109,6 +109,7 @@ def list_contents(token, owner, repo, path="", ref=None, log=None):
             "path": data.get("path", ""),
             "type": data.get("type", "file"),
             "size": data.get("size", 0),
+            "sha": data.get("sha", ""),
         }]
     result = []
     for it in data:
@@ -117,6 +118,7 @@ def list_contents(token, owner, repo, path="", ref=None, log=None):
             "path": it.get("path", ""),
             "type": it.get("type", "file"),
             "size": it.get("size", 0),
+            "sha": it.get("sha", ""),
         })
     result.sort(key=lambda x: (0 if x["type"] == "dir" else 1, x["name"].lower()))
     return result
@@ -287,102 +289,117 @@ def sync_fork(token, owner, repo, branch=None, log=None):
 
 
 def update_file(token, owner, repo, path, content, message, sha=None, log=None):
-    """创建或更新文件，返回 commit 信息"""
+    """更新文本文件——用 urllib 调 API，避免命令行长度限制"""
     import base64
+    import urllib.request
+    import urllib.error
+    from urllib.parse import quote
 
-    # 没传 sha 时先查
     if not sha:
-        rc, out, err = _gh(token, ["api", f"/repos/{owner}/{repo}/contents/{path}"],
+        rc, out, err = _gh(token, ["api", f"/repos/{owner}/{repo}/contents/{quote(path)}"],
                            check=False, log=log)
         if rc == 0 and out.strip():
             try:
-                data = json.loads(out)
-                sha = data.get("sha", "")
+                d = json.loads(out)
+                sha = d.get("sha", "")
             except Exception:
                 pass
 
     b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    args = ["api", "-X", "PUT", f"/repos/{owner}/{repo}/contents/{path}",
-            "-f", f"message={message}",
-            "-f", f"content={b64}"]
+    body = {"message": message, "content": b64}
     if sha:
-        args += ["-f", f"sha={sha}"]
+        body["sha"] = sha
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{quote(path)}"
+    req = urllib.request.Request(url, method="PUT")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "gh-web-tool")
+    data = json.dumps(body).encode("utf-8")
+    if log:
+        log(f"$ PUT {url}  ({len(data)} bytes)")
+
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=120) as resp:
+            out = resp.read().decode("utf-8")
+        return json.loads(out) if out.strip() else {}
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            err_body = ""
+        raise RuntimeError(f"HTTP {e.code}: {err_body[:300] or e.reason}")
+    except Exception as e:
+        raise RuntimeError(str(e))
+
+
+def upload_file_binary(token, owner, repo, path, data_bytes, message, sha=None, log=None):
+    """上传二进制文件（bytes）—— 用 urllib 调 GitHub REST API，避免命令行长度限制"""
+    import base64
+    import urllib.request
+    import urllib.error
+    from urllib.parse import quote
+
+    if not sha:
+        rc, out, err = _gh(token, ["api", f"/repos/{owner}/{repo}/contents/{quote(path)}"],
+                           check=False, log=log)
+        if rc == 0 and out.strip():
+            try:
+                d = json.loads(out)
+                sha = d.get("sha", "")
+            except Exception:
+                pass
+
+    b64 = base64.b64encode(data_bytes).decode("ascii")
+    body = {"message": message, "content": b64}
+    if sha:
+        body["sha"] = sha
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{quote(path)}"
+    req = urllib.request.Request(url, method="PUT")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "gh-web-tool")
+    data = json.dumps(body).encode("utf-8")
+    if log:
+        log(f"$ PUT {url}  ({len(data)} bytes)")
+
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=120) as resp:
+            out = resp.read().decode("utf-8")
+        return json.loads(out) if out.strip() else {}
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            err_body = ""
+        raise RuntimeError(f"HTTP {e.code}: {err_body[:300] or e.reason}")
+    except Exception as e:
+        raise RuntimeError(str(e))
+
+
+def delete_file(token, owner, repo, path, message, sha=None, log=None):
+    """删除文件"""
+    if not sha:
+        rc, out, err = _gh(token, ["api", f"/repos/{owner}/{repo}/contents/{path}"],
+                           check=False, log=log)
+        if rc != 0:
+            raise RuntimeError((err or out or "获取文件 sha 失败").strip())
+        try:
+            data = json.loads(out)
+            sha = data.get("sha", "")
+        except Exception:
+            pass
+    if not sha:
+        raise RuntimeError("无法获取文件 sha")
+    args = ["api", "-X", "DELETE", f"/repos/{owner}/{repo}/contents/{path}",
+            "-f", f"message={message}",
+            "-f", f"sha={sha}"]
     rc, out, err = _gh(token, args, log=log)
     try:
         return json.loads(out)
     except Exception:
         return {"raw": out}
-
-
-def list_file_commits(token, owner, repo, path, limit=30, log=None):
-    """列出某文件的提交历史"""
-    from urllib.parse import quote
-    url = (f"/repos/{owner}/{repo}/commits"
-           f"?path={quote(path)}&per_page={limit}")
-    rc, out, err = _gh(token, ["api", url], log=log, check=False)
-    if rc != 0:
-        msg = (err or out or "").strip()
-        if "404" in msg and "empty" in msg.lower():
-            return []
-        # 空仓库
-        if "Git Repository is empty" in msg:
-            return []
-        raise RuntimeError(msg or f"拉取提交历史失败 (exit {rc})")
-    data = json.loads(out) if out.strip() else []
-    if not isinstance(data, list):
-        return []
-    result = []
-    for c in data:
-        commit = c.get("commit") or {}
-        author = commit.get("author") or {}
-        result.append({
-            "sha": c.get("sha", ""),
-            "short": c.get("sha", "")[:7],
-            "message": (commit.get("message") or "").split("\n")[0],
-            "author": author.get("name", ""),
-            "date": _fmt_utc(author.get("date", "")),
-        })
-    return result
-
-
-def get_commit_file_diff(token, owner, repo, sha, path, log=None):
-    """获取某个 commit 里指定文件的 diff"""
-    rc, out, err = _gh(token, ["api", f"/repos/{owner}/{repo}/commits/{sha}"], log=log)
-    data = json.loads(out)
-    commit = data.get("commit") or {}
-    for f in (data.get("files") or []):
-        if f.get("filename") == path:
-            return {
-                "filename": f.get("filename", ""),
-                "status": f.get("status", ""),
-                "additions": f.get("additions", 0),
-                "deletions": f.get("deletions", 0),
-                "patch": f.get("patch", ""),
-                "message": commit.get("message", ""),
-                "sha": sha,
-                "short": sha[:7],
-            }
-    return None
-
-
-def compare_refs(token, owner, repo, base, head, log=None):
-    """对比两个 ref（tag / commit / 分支）"""
-    rc, out, err = _gh(token, ["api", f"/repos/{owner}/{repo}/compare/{base}...{head}"], log=log)
-    data = json.loads(out)
-    files = []
-    for f in (data.get("files") or []):
-        files.append({
-            "filename": f.get("filename", ""),
-            "status": f.get("status", ""),
-            "additions": f.get("additions", 0),
-            "deletions": f.get("deletions", 0),
-            "patch": f.get("patch", ""),
-        })
-    return {
-        "status": data.get("status", ""),
-        "ahead_by": data.get("ahead_by", 0),
-        "behind_by": data.get("behind_by", 0),
-        "total_commits": data.get("total_commits", 0),
-        "files": files,
-    }
 

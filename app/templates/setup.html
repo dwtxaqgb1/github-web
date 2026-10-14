@@ -19,7 +19,10 @@
       <li>点 <b>New SSH key</b>，Title 随便填</li>
       <li>把下面这一整行粘进 Key 框，保存</li>
     </ol>
-    <textarea readonly style="min-height:70px;font-size:12px">{{ ssh_pubkey }}</textarea>
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px">
+      <textarea readonly id="sshPubkeyBox" style="min-height:70px;font-size:12px;flex:1;margin:0">{{ ssh_pubkey }}</textarea>
+      <button type="button" class="ghost" style="margin-top:0;flex-shrink:0" onclick="copyPubkey()">📋 复制</button>
+    </div>
     <div class="hint">加好后，git push 会自动走 SSH over 443，绕过 github.com:443 的丢包。</div>
   {% endif %}
 </div>
@@ -120,6 +123,46 @@ async function checkTokenScopes() {
   } catch (e) {
     out.innerHTML = '<div class="msg err">检测失败: ' + e.message + '</div>';
   }
+}
+
+async function copyPubkey() {
+  var box = document.getElementById('sshPubkeyBox');
+  if (!box) return;
+  var text = box.value.trim();
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      showCopyTip('✅ 已复制到剪贴板');
+    } else {
+      box.focus();
+      box.select();
+      box.setSelectionRange(0, text.length);
+      var ok = document.execCommand('copy');
+      window.getSelection().removeAllRanges();
+      showCopyTip(ok ? '✅ 已复制' : '⚠️ 请手动长按选择复制');
+    }
+  } catch (e) {
+    box.focus();
+    box.select();
+    showCopyTip('⚠️ 复制失败，请手动长按选择复制');
+  }
+}
+
+function showCopyTip(msg) {
+  var el = document.getElementById('copyTip');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'copyTip';
+    el.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(16,185,129,.95);color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:999;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:opacity .3s';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(window._copyTipTimer);
+  window._copyTipTimer = setTimeout(function() {
+    el.style.opacity = '0';
+    setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 400);
+  }, 1800);
 }
 </script>
 {% endblock %}

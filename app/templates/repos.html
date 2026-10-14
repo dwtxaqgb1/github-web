@@ -6,16 +6,19 @@
 {% endif %}
 
 <div class="card">
-  <h2><span class="dot"></span>我的项目（{{ owner }}）
-    <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="ghost" type="button" style="font-size:12px;padding:4px 12px"
-              onclick="forkAnyRepo()">Fork 别人的仓库</button>
-      <button class="ghost" type="button" style="font-size:12px;padding:4px 12px"
-              onclick="loadRepos()">刷新</button>
-    </span>
+  <h2><span class="dot"></span><span id="pageTitle">我的仓库（{{ owner }}）</span>
+    <button class="ghost" type="button" style="margin-left:auto;font-size:12.5px;padding:5px 14px"
+            onclick="refreshCurrentTab()">🔄 刷新</button>
   </h2>
+  <div style="display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap">
+    <button type="button" class="ghost tab-btn" data-tab="mine" onclick="switchTab('mine')" style="font-size:12.5px;padding:5px 14px">我的仓库</button>
+    <button type="button" class="ghost tab-btn" data-tab="starred" onclick="switchTab('starred')" style="font-size:12.5px;padding:5px 14px">星标仓库</button>
+    <button class="ghost" type="button" style="font-size:12.5px;padding:5px 14px"
+            onclick="forkAnyRepo()">Fork 别人的仓库</button>
+  </div>
   <div style="margin-bottom:12px">
     <input type="text" id="searchBox" placeholder="搜索项目名称或描述..." oninput="filterRepos()">
+
   </div>
   <div id="repoList"><div class="empty">加载中...</div></div>
 </div>
@@ -53,8 +56,14 @@
 let allRepos = [];
 let _pollTimers = {};
 let _releasesCtx = {owner: '', repo: '', accel_base: ''};
-let fileCtx = {owner: '', repo: '', path: '', branch: 'main', accel_base: '', isPrivate: false};
+let fileCtx = {owner: '', repo: '', path: '', branch: 'main', accel_base: '', isPrivate: false, currentItems: []};
 let _syncCache = null;
+let _starredSet = new Set();
+let _currentTab = 'mine';  // mine | starred
+let _mineLoaded = false;
+let _starredLoaded = false;
+let _allStarredRepos = [];
+let _repoFilter = 'all';  // all | starred
 let _syncDialogCtx = {owner: '', name: ''};
 let _sysInfo = null;
 
@@ -78,7 +87,11 @@ function intervalLabel(k) {
 
 function renderRepos(list) {
   const el = document.getElementById('repoList');
-  if (!list.length) { el.innerHTML = '<div class="empty">没有匹配的项目</div>'; return; }
+  if (!list.length) {
+    var emptyMsg = _currentTab === 'starred' ? '还没有星标任何仓库' : '没有匹配的项目';
+    el.innerHTML = '<div class="empty">' + emptyMsg + '</div>';
+    return;
+  }
   let html = '';
   list.forEach(function(repo) {
     const vis = repo.private ? '<span class="badge pending">私有</span>' : '<span class="badge success">公开</span>';
@@ -86,15 +99,39 @@ function renderRepos(list) {
     const fork = repo.fork ? '<span class="badge running">Fork</span>' : '';
     const lang = repo.language ? '<span class="time">' + escHtml(repo.language) + '</span>' : '';
     const stars = repo.stars ? '<span class="time">⭐ ' + repo.stars + '</span>' : '';
-    let forkBtns = '';
-    if (repo.fork) {
-      forkBtns =
-        '<button class="ghost" type="button" style="border-color:#60a5fa;color:#93c5fd" onclick="syncFork(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">同步</button>' +
-        '<button class="ghost" type="button" style="border-color:#a78bfa;color:#c4b5fd" onclick="syncConfig(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">自动</button>';
+    const full = repo.owner + '/' + repo.name;
+    const starred = _starredSet.has(full);
+
+    let actionsHtml = '';
+
+    if (_currentTab === 'starred') {
+      actionsHtml = '<button class="ghost" type="button" style="border-color:#fbbf24;color:#fbbf24" onclick="toggleStar(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">取消星标</button>';
+    } else {
+      let forkBtns = '';
+      if (repo.fork) {
+        forkBtns =
+          '<button class="ghost" type="button" onclick="syncFork(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">同步</button>' +
+          '<button class="ghost" type="button" onclick="syncConfig(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">自动</button>';
+      }
+      let starLabel = starred ? '取消星标' : '星标';
+
+      actionsHtml =
+        '<button class="ghost" type="button" style="border-color:#60a5fa;color:#60a5fa" onclick="viewFiles(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\', ' + (repo.private ? 'true' : 'false') + ')">文件</button>' +
+        '<button class="ghost" type="button" style="border-color:#10b981;color:#34d399" onclick="newVersion(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">发布新版本</button>' +
+        '<button class="ghost" type="button" style="border-color:#a78bfa;color:#c4b5fd" onclick="editReadme(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\')">编辑 README</button>' +
+        '<button class="ghost" type="button" style="border-color:#f59e0b;color:#fbbf24" onclick="setupBuild(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\')">构建镜像</button>' +
+        '<button class="ghost" type="button" style="border-color:#06b6d4;color:#06b6d4" onclick="showReleases(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">版本</button>' +
+        '<button class="ghost" type="button" style="border-color:#ec4899;color:#ec4899" onclick="cloneRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\')">克隆</button>' +
+        forkBtns +
+        '<button class="ghost" type="button" style="border-color:#14b8a6;color:#14b8a6" onclick="renameRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">重命名</button>' +
+        '<button class="ghost" type="button" style="border-color:#84cc16;color:#84cc16" onclick="toggleArchive(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', ' + (repo.archived ? 'false' : 'true') + ')">' + (repo.archived ? '取消归档' : '归档') + '</button>' +
+        '<button class="ghost" type="button" style="border-color:#fbbf24;color:#fbbf24" onclick="toggleStar(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">' + starLabel + '</button>' +
+        '<button class="ghost danger" type="button" onclick="deleteRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">删除</button>';
     }
+
     html += '<div class="repo-item"><div class="repo-main">' +
       '<div class="repo-title">' +
-        '<a href="' + escHtml(repo.url) + '" target="_blank" rel="noopener" class="repo-name">' + escHtml(repo.name) + '</a>' +
+        '<a href="' + escHtml(repo.url) + '" target="_blank" rel="noopener" class="repo-name">' + escHtml(repo.owner + '/' + repo.name) + '</a>' +
         vis + arc + fork +
       '</div>' +
       (repo.description ? '<div class="repo-desc">' + escHtml(repo.description) + '</div>' : '') +
@@ -103,43 +140,137 @@ function renderRepos(list) {
         '<span class="time">' + fmtSize(repo.size_kb) + '</span>' +
         syncBadgeHtml(repo) +
       '</div></div>' +
-      '<div class="repo-actions">' +
-        '<button class="ghost" type="button" onclick="viewFiles(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\', ' + (repo.private ? 'true' : 'false') + ')">文件</button>' +
-        '<button class="ghost" type="button" style="border-color:#10b981;color:#34d399" onclick="newVersion(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">发布新版本</button>' +
-        '<button class="ghost" type="button" style="border-color:#a78bfa;color:#c4b5fd" onclick="generateReadme(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">生成 README</button>' +
-        '<button class="ghost" type="button" onclick="showReleases(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">版本</button>' +
-        '<button class="ghost" type="button" onclick="cloneRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\')">克隆</button>' +
-        forkBtns +
-        '<button class="ghost" type="button" onclick="renameRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">重命名</button>' +
-        '<button class="ghost" type="button" onclick="toggleArchive(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', ' + (repo.archived ? 'false' : 'true') + ')">' + (repo.archived ? '取消归档' : '归档') + '</button>' +
-        '<button class="ghost danger" type="button" onclick="deleteRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">删除</button>' +
-      '</div></div>';
+      '<div class="repo-actions">' + actionsHtml + '</div></div>';
   });
   el.innerHTML = html;
 }
 
 function filterRepos() {
   const q = (document.getElementById('searchBox').value || '').trim().toLowerCase();
-  if (!q) { renderRepos(allRepos); return; }
-  const filtered = allRepos.filter(function(r) {
-    return r.name.toLowerCase().indexOf(q) >= 0 ||
-           (r.description || '').toLowerCase().indexOf(q) >= 0 ||
-           (r.language || '').toLowerCase().indexOf(q) >= 0;
-  });
-  renderRepos(filtered);
+  let list;
+  if (_currentTab === 'starred') {
+    list = _allStarredRepos.slice();
+    // 星标 Tab 里仍然支持文字搜索，不做 filter-btn
+  } else {
+    list = allRepos.slice();
+    if (_repoFilter === 'starred') {
+      list = list.filter(function(r) { return _starredSet.has(r.owner + '/' + r.name); });
+    }
+  }
+  if (q) {
+    list = list.filter(function(r) {
+      return r.name.toLowerCase().indexOf(q) >= 0 ||
+             (r.description || '').toLowerCase().indexOf(q) >= 0 ||
+             (r.language || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  renderRepos(list);
 }
 
-async function loadRepos() {
-  const el = document.getElementById('repoList');
-  el.innerHTML = '<div class="empty">加载中...</div>';
+
+async function loadStarredRepos(force) {
+  var el = document.getElementById('repoList');
+  var url = '/api/repos/starred_repos' + (force ? '?use_cache=0' : '');
+  _startLoadingTimer(el, force ? '刷新中' : '加载中');
   try {
-    await loadSyncStatus();
-    const r = await fetch('/api/repos');
-    const j = await r.json();
+    var r = await fetch(url);
+    var j = await r.json();
+    _stopLoadingTimer();
     if (j.error) { el.innerHTML = '<div class="msg err">' + escHtml(j.error) + '</div>'; return; }
-    allRepos = j.repos || [];
+    _allStarredRepos = j.repos || [];
+    _starredLoaded = true;
     filterRepos();
   } catch (e) {
+    _stopLoadingTimer();
+    el.innerHTML = '<div class="msg err">加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+
+function refreshCurrentTab() {
+  if (_currentTab === 'starred') {
+    _starredLoaded = false;
+    loadStarredRepos(true);
+  } else {
+    _mineLoaded = false;
+    loadRepos(true);
+  }
+}
+
+function switchTab(tab) {
+  _currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(function(b) {
+    if (b.getAttribute('data-tab') === tab) {
+      b.style.background = '#3b82f6';
+      b.style.color = '#fff';
+      b.style.borderColor = '#3b82f6';
+    } else {
+      b.style.background = 'transparent';
+      b.style.color = '';
+      b.style.borderColor = '';
+    }
+  });
+
+  var t = document.getElementById('pageTitle');
+  if (t) t.textContent = (tab === 'mine') ? ('我的仓库（{{ owner }}）') : '星标仓库';
+  if (tab === 'mine') {
+    if (_mineLoaded) filterRepos();
+    else loadRepos(false);
+  } else {
+    if (_starredLoaded) filterRepos();
+    else loadStarredRepos(false);
+  }
+}
+
+async function loadStarredSet() {
+  try {
+    const r = await fetch('/api/repos/starred_list');
+    const j = await r.json();
+    _starredSet = new Set(j.starred || []);
+  } catch (e) {
+    _starredSet = new Set();
+  }
+}
+
+
+var _loadingTimer = null;
+var _loadingSeconds = 0;
+
+function _startLoadingTimer(el, label) {
+  _stopLoadingTimer();
+  _loadingSeconds = 0;
+  el.innerHTML = '<div class="empty">' + (label || '加载中') + '... 0s</div>';
+  _loadingTimer = setInterval(function() {
+    _loadingSeconds++;
+    el.innerHTML = '<div class="empty">' + (label || '加载中') + '... ' + _loadingSeconds + 's</div>';
+  }, 1000);
+}
+
+function _stopLoadingTimer() {
+  if (_loadingTimer) {
+    clearInterval(_loadingTimer);
+    _loadingTimer = null;
+  }
+}
+
+async function loadRepos(force) {
+  const el = document.getElementById('repoList');
+  const url = '/api/repos' + (force ? '?use_cache=0' : '');
+  _startLoadingTimer(el, force ? '刷新中' : '加载中');
+  try {
+    const reposResp = await fetch(url).then(r => r.json());
+    if (reposResp.error) {
+      el.innerHTML = '<div class="msg err">' + escHtml(reposResp.error) + '</div>';
+      return;
+    }
+    allRepos = reposResp.repos || [];
+    _mineLoaded = true;
+    _stopLoadingTimer();
+    filterRepos();
+    loadSyncStatus().then(function() { if (_currentTab === 'mine') filterRepos(); }).catch(function(){});
+    loadStarredSet().then(function() { if (_currentTab === 'mine') filterRepos(); }).catch(function(){});
+  } catch (e) {
+    _stopLoadingTimer();
     el.innerHTML = '<div class="msg err">加载失败: ' + escHtml(e.message) + '</div>';
   }
 }
@@ -240,7 +371,12 @@ async function saveSyncConfig() {
 }
 
 async function forkAnyRepo() {
-  const url = prompt('Fork 别人的 GitHub 仓库到我的账号\n\n输入源仓库地址，支持：\n  https://github.com/owner/repo\n  owner/repo\n\nFork 后可以点「克隆」拉到 NAS。');
+  const url = await myPrompt({
+    title: 'Fork 别人的仓库',
+    message: 'Fork 到我的账号',
+    placeholder: 'owner/repo 或 https://github.com/owner/repo',
+    hint: '支持：\nowner/repo\nhttps://github.com/owner/repo\n\nFork 后可点「克隆」拉到 NAS'
+  });
   if (!url || !url.trim()) return;
   openModal('Fork 仓库', '正在创建任务...');
   try {
@@ -279,9 +415,13 @@ async function cloneRepo(owner, name, branch) {
   }
   tip += '  或相对路径  → 自动放 /work 下\n\n容器 /work → NAS: ' + (sys.work_dir || '未配置') + '\n';
   if (sys.nas_enabled) tip += '容器 /nas  → NAS: ' + sys.nas_dir + '\n';
-  const input = prompt(tip, defaultRel);
-  if (input === null) return;
-  const subpath = input.trim();
+  const subpath = await myPrompt({
+    title: '克隆到 NAS',
+    message: '目标目录 ' + owner + '/' + name,
+    defaultValue: defaultRel,
+    hint: '容器 /work 对应 NAS: ' + (sys.work_dir || '未配置')
+  });
+  if (subpath === null) return;
   openModal('克隆 ' + owner + '/' + name, '正在创建任务...');
   try {
     const r = await fetch('/api/repos/clone', {
@@ -368,7 +508,12 @@ function renderReleases(list) {
 
 async function rollbackTo(tag) {
   const owner = _releasesCtx.owner, repo = _releasesCtx.repo;
-  const input = prompt('⚠️ 回滚会把 ' + owner + '/' + repo + ' 的 main 分支强制覆盖为 ' + tag + ' 的代码\n历史提交会丢失\n\n请输入「' + tag + '」确认：');
+  const input = await myPrompt({
+    title: '⚠️ 回滚仓库',
+    message: '把 ' + owner + '/' + repo + ' 的 main 分支强制覆盖为 ' + tag + ' 的代码',
+    placeholder: tag,
+    hint: '历史提交会丢失（远端已发布的 Release 不受影响）\n请输入「' + tag + '」确认'
+  });
   if (input !== tag) { alert('已取消'); return; }
   try {
     const r = await fetch('/api/repos/rollback', {
@@ -388,15 +533,51 @@ async function rollbackTo(tag) {
 
 var _readmeCtx = {owner: '', repo: '', branch: 'main', readme_sha: '', readme_exists: false, current: ''};
 
+async function editReadme(owner, repo, branch) {
+  _readmeCtx = {owner: owner, repo: repo, branch: branch || 'main', readme_sha: '', readme_exists: false, current: ''};
+
+  document.getElementById('readmeTitle').textContent = '编辑 README · ' + owner + '/' + repo;
+  document.getElementById('readmeInfo').textContent = '加载中...';
+  document.getElementById('readmeTextarea').value = '';
+  document.getElementById('readmeDialog').style.display = 'flex';
+
+  try {
+    var content = '';
+    var sha = '';
+    var exists = false;
+    var r = await fetch('/api/repos/file?owner=' + encodeURIComponent(owner) +
+                        '&repo=' + encodeURIComponent(repo) +
+                        '&path=' + encodeURIComponent('README.md'));
+    var j = await r.json();
+    if (j.error) {
+      content = '# ' + repo + '\n\n简介...\n';
+      exists = false;
+    } else {
+      content = j.content || '';
+      sha = j.sha || '';
+      exists = true;
+    }
+    _readmeCtx.readme_sha = sha;
+    _readmeCtx.readme_exists = exists;
+    _readmeCtx.current = content;
+    document.getElementById('readmeTextarea').value = content;
+    document.getElementById('readmeInfo').textContent = exists
+      ? '📝 编辑现有 README.md'
+      : '🆕 新建 README.md';
+  } catch (e) {
+    document.getElementById('readmeInfo').textContent = '❌ 加载失败: ' + e.message;
+  }
+}
+
 async function generateReadme(owner, repo, branch) {
   _readmeCtx = {owner: owner, repo: repo, branch: branch || 'main', readme_sha: '', readme_exists: false, current: ''};
 
-  // 先问描述（可选，回车用默认）
-  var desc = prompt(
-    '生成 README：' + owner + '/' + repo + '\n\n' +
-    '可以填一句话简介（留空则用仓库已有的描述）：',
-    ''
-  );
+  var desc = await myPrompt({
+    title: '生成 README',
+    message: '根据文件结构自动生成草稿：' + owner + '/' + repo,
+    placeholder: '一句话简介（可留空）',
+    hint: '留空则用仓库已有的描述'
+  });
   if (desc === null) return;
 
   document.getElementById('readmeTitle').textContent = '生成 README · ' + owner + '/' + repo;
@@ -447,11 +628,12 @@ async function saveReadmeToRepo() {
     return;
   }
   var exists = _readmeCtx.readme_exists;
-  var msg = prompt(
-    exists ? 'README.md 已存在，保存会覆盖它。\n\n填写 commit message：'
-           : '新建 README.md。\n\n填写 commit message：',
-    exists ? 'update README.md' : 'add README.md'
-  );
+  var msg = await myPrompt({
+    title: exists ? '保存 README（覆盖）' : '新建 README',
+    message: exists ? 'README.md 已存在，保存会覆盖它' : '将新建 README.md',
+    defaultValue: exists ? 'update README.md' : 'add README.md',
+    placeholder: 'commit message'
+  });
   if (msg === null) return;
   if (!msg.trim()) msg = exists ? 'update README.md' : 'add README.md';
 
@@ -490,8 +672,193 @@ async function saveReadmeToRepo() {
   }
 }
 
+
+async function setupBuild(owner, repo, branch) {
+  openModal('配置镜像构建 · ' + owner + '/' + repo, '正在检查...');
+  try {
+    var r = await fetch('/api/repos/setup_build', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, repo: repo, branch: branch})
+    });
+    var j = await r.json();
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+
+    var html = '';
+    (j.steps || []).forEach(function(s) {
+      html += '<div style="padding:6px 0;font-size:13px">' +
+        (s.ok ? '✅' : '⚠️') + ' ' + escHtml(s.msg) +
+        (s.hint ? '<div style="margin-top:4px;font-size:12px;color:#fbbf24">' + escHtml(s.hint) + '</div>' : '') +
+        '</div>';
+    });
+
+    var allOk = (j.steps || []).every(function(x) { return x.ok; });
+    if (allOk) {
+      var img = 'ghcr.io/' + owner.toLowerCase() + '/' + repo.toLowerCase() + ':latest';
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e293b">';
+      html += '<div style="color:#34d399;font-size:13px;margin-bottom:8px">🎉 已配置完成，GitHub 会自动开始构建</div>';
+      html += '<a href="' + escHtml(j.actions_url) + '" target="_blank" rel="noopener" style="font-size:13px">→ 查看构建进度</a>';
+      html += '<div style="margin-top:12px;font-size:12px;color:#8b9cba;line-height:1.7">';
+      html += '镜像地址：<br><code style="color:#93c5fd;word-break:break-all">' + escHtml(img) + '</code><br><br>';
+      html += '拉取：<br><code style="color:#93c5fd">docker pull ' + escHtml(img) + '</code>';
+      html += '</div>';
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e293b">';
+      html += '<div style="font-size:13px;color:#cbd5e1;margin-bottom:8px">镜像可见性</div>';
+      html += '<div id="pkgVisStatus" style="font-size:12.5px;color:#8b9cba;margin-bottom:10px">查询可见性...</div>';
+      html += '<button type="button" class="ghost" style="border-color:#10b981;color:#34d399" onclick="makePackagePublic(\'' + jsStr(owner) + '\', \'' + jsStr(repo) + '\')">🌐 设为公开</button>';
+      html += '</div>';
+      // 构建历史区
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e293b">';
+      html += '<div style="font-size:13px;color:#cbd5e1;margin-bottom:8px">📋 构建历史 <button type="button" class="ghost" style="margin-left:8px;padding:2px 10px;font-size:11.5px" onclick="loadBuildHistory(\'' + jsStr(owner) + '\', \'' + jsStr(repo) + '\')">刷新</button></div>';
+      html += '<div id="buildHistoryBox" style="font-size:12.5px;color:#8b9cba">加载中...</div>';
+      html += '</div>';
+      html += '</div>';
+    } else {
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e293b;font-size:13px;color:#fbbf24">';
+      html += '有步骤未成功，请按提示手动处理后重试。';
+      html += '</div>';
+    }
+
+    var log = document.getElementById('modalLog');
+    log.style.display = 'block';
+    log.innerHTML = html;
+
+    if (allOk) {
+      setTimeout(function() { refreshPkgVisibility(repo); }, 50);
+      setTimeout(function() { loadBuildHistory(owner, repo); }, 50);
+    }
+  } catch (e) {
+    renderLog('请求失败: ' + e.message);
+  }
+}
+
+
+async function refreshPkgVisibility(repo) {
+  var status = document.getElementById('pkgVisStatus');
+  if (!status) return;
+  try {
+    var r = await fetch('/api/repos/package_visibility?package_name=' + encodeURIComponent(repo));
+    var j = await r.json();
+    if (j.error) {
+      status.innerHTML = '点下方按钮将镜像设为公开，让别人也能 pull';
+      return;
+    }
+    if (j.visibility === 'public') {
+      status.innerHTML = '<span style="color:#34d399">✅ 当前是公开的（任何人都能 pull）</span>';
+    } else if (j.visibility === 'private') {
+      status.innerHTML = '<span style="color:#fbbf24">🔒 当前是私有的（只有自己或登录用户能 pull）</span>';
+    } else {
+      status.innerHTML = '点下方按钮将镜像设为公开，让别人也能 pull';
+    }
+  } catch (e) {
+    status.innerHTML = '点下方按钮将镜像设为公开，让别人也能 pull';
+  }
+}
+
+async function makePackagePublic(owner, repo) {
+  var status = document.getElementById('pkgVisStatus');
+  if (!status) return;
+  status.innerHTML = '⏳ 正在设置...';
+  try {
+    var r = await fetch('/api/repos/set_package_public', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({package_name: repo})
+    });
+    var j = await r.json();
+    if (j.error) {
+      status.innerHTML = '<span style="color:#f87171">❌ ' + escHtml(j.error) + '</span>';
+      return;
+    }
+    status.innerHTML = '<span style="color:#34d399">✅ ' + escHtml(j.message) + '</span>';
+    setTimeout(function() { refreshPkgVisibility(repo); }, 500);
+  } catch (e) {
+    status.innerHTML = '<span style="color:#f87171">❌ 请求失败: ' + escHtml(e.message) + '</span>';
+  }
+}
+
+
+function conclusionIcon(status, conclusion) {
+  if (status === 'in_progress' || status === 'queued' || status === 'requested') {
+    return '<span style="color:#fbbf24">⏳</span>';
+  }
+  if (conclusion === 'success') return '<span style="color:#34d399">✅</span>';
+  if (conclusion === 'failure') return '<span style="color:#f87171">❌</span>';
+  if (conclusion === 'cancelled') return '<span style="color:#8b9cba">⛔</span>';
+  if (conclusion === 'skipped') return '<span style="color:#8b9cba">⏭</span>';
+  return '<span style="color:#8b9cba">•</span>';
+}
+
+function conclusionText(status, conclusion) {
+  if (status === 'in_progress') return '构建中';
+  if (status === 'queued' || status === 'requested') return '排队中';
+  if (conclusion === 'success') return '成功';
+  if (conclusion === 'failure') return '失败';
+  if (conclusion === 'cancelled') return '已取消';
+  if (conclusion === 'skipped') return '已跳过';
+  return status || '-';
+}
+
+async function loadBuildHistory(owner, repo) {
+  var box = document.getElementById('buildHistoryBox');
+  if (!box) return;
+  box.innerHTML = '加载中...';
+  try {
+    var r = await fetch('/api/repos/build_history?owner=' + encodeURIComponent(owner) +
+                        '&repo=' + encodeURIComponent(repo) + '&limit=10');
+    var j = await r.json();
+    if (j.error) { box.innerHTML = '<span style="color:#f87171">' + escHtml(j.error) + '</span>'; return; }
+    var runs = j.runs || [];
+    if (!runs.length) { box.innerHTML = '<span style="color:#8b9cba">还没有构建记录</span>'; return; }
+    var html = '';
+    runs.forEach(function(x) {
+      html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid rgba(30,41,59,.4)">';
+      html += '<span style="flex-shrink:0">' + conclusionIcon(x.status, x.conclusion) + '</span>';
+      html += '<div style="flex:1;min-width:0">';
+      html += '<div style="color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(x.message || '(无描述)') + '</div>';
+      html += '<div style="color:#64748b;font-size:11.5px;margin-top:2px">#' + x.run_number + ' · ' + escHtml(x.branch) + ' · ' + escHtml(x.sha_short) + ' · ' + escHtml(x.created) + ' · ' + conclusionText(x.status, x.conclusion) + '</div>';
+      html += '</div>';
+      html += '<a href="' + escHtml(x.html_url) + '" target="_blank" rel="noopener" style="font-size:11.5px;flex-shrink:0">详情 →</a>';
+      html += '</div>';
+    });
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<span style="color:#f87171">加载失败: ' + escHtml(e.message) + '</span>';
+  }
+}
+
+
+async function toggleStar(owner, repo) {
+  var full = owner + '/' + repo;
+  var starred = _starredSet.has(full);
+  var action = starred ? 'unstar' : 'star';
+  try {
+    var r = await fetch('/api/repos/toggle_star', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, repo: repo, action: action})
+    });
+    var j = await r.json();
+    if (j.error) { alert('操作失败: ' + j.error); return; }
+    if (j.starred) {
+      _starredSet.add(full);
+    } else {
+      _starredSet.delete(full);
+    }
+    filterRepos();
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  }
+}
+
 async function deleteRepo(owner, name) {
-  const input = prompt('⚠️ 删除仓库不可恢复！\n\n请输入仓库名称「' + name + '」确认删除：');
+  const input = await myPrompt({
+    title: '⚠️ 删除仓库',
+    message: '删除操作不可恢复！',
+    placeholder: name,
+    hint: '请输入仓库名称「' + name + '」确认删除'
+  });
+  if (input === null) return;
   if (input !== name) { alert('名称不匹配，已取消'); return; }
   const r = await fetch('/api/repos/delete', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -504,7 +871,12 @@ async function deleteRepo(owner, name) {
 }
 
 async function renameRepo(owner, name) {
-  const newName = prompt('重命名 ' + owner + '/' + name + '\n\n新名称：', name);
+  const newName = await myPrompt({
+    title: '重命名仓库',
+    message: owner + '/' + name,
+    defaultValue: name,
+    placeholder: '新名称'
+  });
   if (!newName || newName === name) return;
   const r = await fetch('/api/repos/rename', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -554,6 +926,7 @@ async function loadFiles(path) {
     if (j.empty_repo) { renderEmptyRepo(fileCtx.owner, fileCtx.repo); return; }
     if (j.error) { renderLog('错误: ' + j.error); return; }
     fileCtx.accel_base = j.accel_base || '';
+    fileCtx.currentItems = j.items || [];
     renderFileList(path, j.items || []);
   } catch (e) { renderLog('加载失败: ' + e.message); }
 }
@@ -608,6 +981,55 @@ function triggerDownload(url, fileName) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
+
+function openUploadDialogFromFiles() {
+  var names = (fileCtx.currentItems || [])
+    .filter(function(x) { return x.type === 'file'; })
+    .map(function(x) { return x.name; });
+  openUploadDialog(fileCtx.owner, fileCtx.repo, fileCtx.path, names);
+}
+
+async function deleteFilePrompt(path, sha) {
+  if (!path) return;
+  var fname = path.split('/').pop();
+  var ok = await myConfirm({
+    title: '⚠️ 删除文件',
+    message: '确定删除 ' + fname + '？\n\n会在仓库产生一次 commit，此操作不可撤销。',
+    okText: '删除',
+    cancelText: '取消'
+  });
+  if (!ok) return;
+  // 找到对应按钮，显示删除中
+  var btn = event && event.target;
+  var oldText = '';
+  if (btn && btn.classList && btn.classList.contains('fdel')) {
+    oldText = btn.textContent;
+    btn.textContent = '⏳';
+    btn.disabled = true;
+  }
+  try {
+    var r = await fetch('/api/repos/delete_file', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: fileCtx.owner, repo: fileCtx.repo, path: path, sha: sha})
+    });
+    var j = await r.json();
+    if (j.error) {
+      if (btn) { btn.textContent = oldText || '✕'; btn.disabled = false; }
+      showToast('删除失败: ' + j.error, 'err');
+      return;
+    }
+    showToast('✅ 已删除 ' + fname);
+    // 直接从当前列表移除
+    fileCtx.currentItems = (fileCtx.currentItems || []).filter(function(x) { return x.path !== path; });
+    renderFileList(fileCtx.path, fileCtx.currentItems);
+  } catch (e) {
+    if (btn) { btn.textContent = oldText || '✕'; btn.disabled = false; }
+    showToast('请求失败: ' + e.message, 'err');
+  }
+}
+
+
 function showFileLoading() {
   if (typeof showEditBtn === 'function') showEditBtn(false);
   if (typeof showHistoryBtn === 'function') showHistoryBtn(false);
@@ -620,14 +1042,17 @@ function renderFileList(path, items) {
   showBackBtn(false);
   if (typeof showEditBtn === 'function') showEditBtn(false);
   if (typeof showHistoryBtn === 'function') showHistoryBtn(false);
-  if (typeof showHistoryBtn === 'function') showHistoryBtn(false);
   const log = document.getElementById('modalLog');
   const list = document.getElementById('modalFileList');
   log.style.display = 'none';
   list.style.display = 'block';
   let html = '';
+  // 上传按钮
+  html += '<div class="fitem" style="color:#60a5fa" onclick="openUploadDialogFromFiles()">' +
+          '<span class="ficon">📤</span><span class="fname">上传文件到当前目录</span></div>';
   if (path) {
-    html += '<div class="fitem back" onclick="loadFiles(\'\')"><span class="ficon">⬆</span><span class="fname">返回上级</span></div>';
+    html += '<div class="fitem back" onclick="loadFiles(\'\')">' +
+            '<span class="ficon">⬆</span><span class="fname">返回上级</span></div>';
   }
   if (!items.length) {
     html += '<div class="empty">(空目录)</div>';
@@ -636,15 +1061,23 @@ function renderFileList(path, items) {
       const icon = it.type === 'dir' ? '📁' : '📄';
       const size = it.type === 'file' ? '<span class="fsize">' + it.size + ' B</span>' : '';
       const cls = it.type === 'dir' ? 'fitem dir' : 'fitem';
-      const handler = it.type === 'dir' ? 'loadFiles(\'' + jsStr(it.path) + '\')' : 'viewFileContent(\'' + jsStr(it.path) + '\')';
+      const handler = it.type === 'dir'
+        ? 'loadFiles(\'' + jsStr(it.path) + '\')'
+        : 'viewFileContent(\'' + jsStr(it.path) + '\')';
       let dlBtn = '';
+      let delBtn = '';
       if (it.type === 'file') {
         const accelTitle = fileCtx.accel_base ? '加速下载' : '下载';
-        dlBtn = '<button class="fdl" type="button" title="' + accelTitle + '" onclick="event.stopPropagation(); downloadFile(\'' + jsStr(it.path) + '\')">⬇</button>';
+        dlBtn = '<button class="fdl" type="button" title="' + accelTitle + '" ' +
+                'onclick="event.stopPropagation(); downloadFile(\'' + jsStr(it.path) + '\')">⬇</button>';
+        delBtn = '<button class="fdel" type="button" title="删除文件" ' +
+                'onclick="event.stopPropagation(); deleteFilePrompt(\'' + jsStr(it.path) + '\', \'' + jsStr(it.sha || '') + '\')">✕</button>';
       }
       html += '<div class="' + cls + '" onclick="' + handler + '">' +
               '<span class="ficon">' + icon + '</span>' +
-              '<span class="fname">' + escHtml(it.name) + '</span>' + size + dlBtn + '</div>';
+              '<span class="fname">' + escHtml(it.name) + '</span>' +
+              size + dlBtn + delBtn +
+              '</div>';
     });
   }
   list.innerHTML = html;
@@ -663,6 +1096,8 @@ function renderEmptyRepo(owner, repo) {
     ' 还没有任何提交。<br>回首页发一次代码就有了。</div></div>';
 }
 
-document.addEventListener('DOMContentLoaded', loadRepos);
+document.addEventListener('DOMContentLoaded', function() {
+  switchTab('mine');
+});
 </script>
 {% endblock %}

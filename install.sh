@@ -1,4 +1,3 @@
-cat > install.sh << 'INSTALL_EOF'
 #!/usr/bin/env bash
 set -e
 
@@ -167,8 +166,3 @@ else
   echo "已跳过启动。稍后执行："
   echo "  docker compose up -d --build"
 fi
-INSTALL_EOF
-
-chmod +x install.sh
-echo "✅ 新 install.sh 已写入"
-wc -l install.sh

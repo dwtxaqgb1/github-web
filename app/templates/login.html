@@ -3,7 +3,8 @@
 {% block body %}
 <div class="card" style="max-width:380px;margin:80px auto">
   <h2>登录</h2>
-  {% if err %}<div class="msg err">{% if locked %}🔒 {% endif %}{{ err }}</div>{% endif %}
+  {% if changed %}<div class="msg ok">✅ 密码已修改，请用新密码重新登录</div>{% endif %}
+{% if err %}<div class="msg err">{% if locked %}🔒 {% endif %}{{ err }}</div>{% endif %}
   <form method="post">
     <label>密码</label>
     <input type="password" name="password" autofocus required>

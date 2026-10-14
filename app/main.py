@@ -19,6 +19,7 @@ from app import ssh_keys
 from app import profiles
 from app import file_templates
 from app import repo_ops
+from app import cache_store
 from app import fork_sync
 from app import login_guard
 from app import readme_gen
@@ -51,6 +52,16 @@ def _fs_log(msg):
         pass
 
 fork_sync.start_scheduler(_fs_sync, _fs_token, _fs_log)
+
+
+@app.after_request
+def add_no_cache_headers(response):
+    ct = response.headers.get("Content-Type", "")
+    if "text/html" in ct or "application/json" in ct:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 def login_required(f):
@@ -93,7 +104,8 @@ def login():
         else:
             err = f"密码错误（还剩 {remain} 次机会）"
 
-    return render_template("login.html", err=err)
+    changed = request.args.get("changed") == "1"
+    return render_template("login.html", err=err, changed=changed)
 
 
 @app.route("/logout")
@@ -169,7 +181,8 @@ def setup():
                 err = "两次密码不一致"
             else:
                 store.set_password(new)
-                msg = "密码已更新"
+                session.clear()
+                return redirect(url_for("login", changed="1"))
     cfg = store.get_config()
     return render_template("setup.html",
                            username=cfg.get("github_username", ""),
@@ -430,10 +443,20 @@ def api_repos():
     username = cfg.get("github_username", "")
     if not owner:
         return jsonify({"error": "未配置 GitHub 用户名"}), 400
+
+    use_cache = request.args.get("use_cache", "1") != "0"
+    cache_key = f"repos_mine_{owner}"
+
+    if use_cache:
+        cached = cache_store.get(cache_key)
+        if cached is not None:
+            return jsonify({"owner": owner, "repos": cached, "from_cache": True})
+
     token = store.get_token()
     try:
         repos = repo_ops.list_repos(token, owner, username=username)
-        return jsonify({"owner": owner, "repos": repos})
+        cache_store.set(cache_key, repos)
+        return jsonify({"owner": owner, "repos": repos, "from_cache": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1199,6 +1222,322 @@ def api_repo_generate_readme():
         "readme_sha": readme_sha,
         "readme_name": "README.md",
     })
+
+
+@app.route("/api/repos/setup_build", methods=["POST"])
+@login_required
+def api_repo_setup_build():
+    data = request.get_json(silent=True) or {}
+    owner = (data.get("owner") or "").strip()
+    repo = (data.get("repo") or "").strip()
+    branch = (data.get("branch") or "main").strip() or "main"
+
+    if not owner or not repo:
+        return jsonify({"error": "缺少参数"}), 400
+
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+
+    result = {
+        "owner": owner,
+        "repo": repo,
+        "steps": [],
+        "actions_url": f"https://github.com/{owner}/{repo}/actions",
+    }
+
+    try:
+        items = repo_ops.list_contents(token, owner, repo, "", ref=branch)
+        names = [it.get("name", "") for it in items]
+        if "Dockerfile" not in names:
+            result["steps"].append({"ok": False, "msg": "仓库根目录没有 Dockerfile，无法构建镜像"})
+            return jsonify(result)
+        result["steps"].append({"ok": True, "msg": "找到 Dockerfile"})
+    except Exception as e:
+        result["steps"].append({"ok": False, "msg": f"读取仓库失败: {e}"})
+        return jsonify(result)
+
+    wf_path = ".github/workflows/docker-publish.yml"
+    wf_exists = False
+    try:
+        for it in repo_ops.list_contents(token, owner, repo, ".github/workflows", ref=branch):
+            if it.get("name") == "docker-publish.yml":
+                wf_exists = True
+                break
+    except Exception:
+        pass
+
+    if not wf_exists:
+        try:
+            repo_ops.ensure_workflow_file(
+                token, owner, repo, wf_path, file_templates.ACTIONS_PUSH_GHCR,
+                message="add docker publish workflow",
+            )
+            result["steps"].append({"ok": True, "msg": "已生成 docker-publish.yml"})
+        except Exception as e:
+            result["steps"].append({"ok": False, "msg": f"生成 workflow 失败: {e}"})
+            return jsonify(result)
+    else:
+        result["steps"].append({"ok": True, "msg": "已存在 docker-publish.yml"})
+
+    try:
+        cur = repo_ops.get_workflow_permission(token, owner, repo)
+        if cur == "write":
+            result["steps"].append({"ok": True, "msg": "Actions 写权限已开启"})
+        else:
+            ok, msg = repo_ops.set_workflow_permission(token, owner, repo)
+            if ok:
+                result["steps"].append({"ok": True, "msg": "已开启 Actions 写权限"})
+            else:
+                result["steps"].append({
+                    "ok": False,
+                    "msg": f"无法自动开启写权限（{msg}）",
+                    "hint": f"请去 GitHub 网页手动设置：https://github.com/{owner}/{repo}/settings/actions → Workflow permissions → Read and write permissions",
+                })
+    except Exception as e:
+        result["steps"].append({
+            "ok": False,
+            "msg": f"权限检查出错: {e}",
+            "hint": f"请去 GitHub 网页手动设置：https://github.com/{owner}/{repo}/settings/actions",
+        })
+
+    result["ok"] = True
+    return jsonify(result)
+
+
+@app.route("/api/repos/set_package_public", methods=["POST"])
+@login_required
+def api_repo_set_package_public():
+    data = request.get_json(silent=True) or {}
+    package_name = (data.get("package_name") or "").strip()
+    if not package_name:
+        return jsonify({"error": "缺少 package_name"}), 400
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+    try:
+        cur = repo_ops.get_package_visibility(token, "", package_name)
+        if cur == "public":
+            return jsonify({"ok": True, "message": "已经是公开的", "visibility": "public"})
+        ok, msg = repo_ops.set_package_visibility(token, "", package_name, "public")
+        if ok:
+            return jsonify({"ok": True, "message": msg, "visibility": "public"})
+        return jsonify({"error": msg}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/repos/build_history")
+@login_required
+def api_repo_build_history():
+    owner = (request.args.get("owner") or "").strip()
+    repo = (request.args.get("repo") or "").strip()
+    limit = request.args.get("limit", "10")
+    try:
+        limit = min(int(limit), 50)
+    except Exception:
+        limit = 10
+    if not owner or not repo:
+        return jsonify({"error": "缺少参数"}), 400
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+    try:
+        runs = repo_ops.list_workflow_runs(token, owner, repo, limit)
+        return jsonify({"runs": runs})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/repos/package_visibility")
+@login_required
+def api_repo_package_visibility():
+    package_name = (request.args.get("package_name") or "").strip()
+    if not package_name:
+        return jsonify({"error": "缺少参数"}), 400
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+    try:
+        vis = repo_ops.get_package_visibility(token, "", package_name)
+        return jsonify({"visibility": vis})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/repos/starred_list")
+@login_required
+def api_repo_starred_list():
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+    use_cache = request.args.get("use_cache", "1") != "0"
+    cfg = store.get_config()
+    owner = cfg.get("gh_owner") or cfg.get("github_username", "")
+    cache_key = f"starred_list_{owner}"
+    if use_cache:
+        cached = cache_store.get(cache_key)
+        if cached is not None:
+            return jsonify({"starred": cached, "from_cache": True})
+    try:
+        starred = repo_ops.list_starred(token)
+        data = sorted(starred)
+        cache_store.set(cache_key, data)
+        return jsonify({"starred": data, "from_cache": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/repos/toggle_star", methods=["POST"])
+@login_required
+def api_repo_toggle_star():
+    data = request.get_json(silent=True) or {}
+    owner = (data.get("owner") or "").strip()
+    repo = (data.get("repo") or "").strip()
+    action = (data.get("action") or "").strip()
+    if not owner or not repo or action not in ("star", "unstar"):
+        return jsonify({"error": "缺少参数"}), 400
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+    try:
+        if action == "star":
+            ok, msg = repo_ops.star_repo(token, owner, repo)
+        else:
+            ok, msg = repo_ops.unstar_repo(token, owner, repo)
+        if ok:
+            return jsonify({"ok": True, "starred": action == "star", "message": msg})
+        return jsonify({"error": msg}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/repos/starred_repos")
+@login_required
+def api_repo_starred_repos():
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+
+    use_cache = request.args.get("use_cache", "1") != "0"
+    cfg = store.get_config()
+    owner = cfg.get("gh_owner") or cfg.get("github_username", "")
+    cache_key = f"repos_starred_{owner}"
+
+    if use_cache:
+        cached = cache_store.get(cache_key)
+        if cached is not None:
+            return jsonify({"repos": cached, "from_cache": True})
+
+    try:
+        repos = repo_ops.list_starred_repos(token)
+        cache_store.set(cache_key, repos)
+        return jsonify({"repos": repos, "from_cache": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/repos/upload_file", methods=["POST"])
+@login_required
+def api_repo_upload_file():
+    owner = (request.form.get("owner") or "").strip()
+    repo = (request.form.get("repo") or "").strip()
+    dir_path = (request.form.get("dir") or "").strip().strip("/")
+    overwrite = request.form.get("overwrite") == "1"
+    commit_msg = (request.form.get("message") or "").strip()
+
+    if not owner or not repo:
+        return jsonify({"error": "缺少参数"}), 400
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "没有选择文件"}), 400
+
+    results = []
+    MAX = 25 * 1024 * 1024  # 25 MB
+
+    for f in files:
+        fname = f.filename or ""
+        if not fname:
+            continue
+        fname = fname.replace("\\", "/").split("/")[-1]
+        if not fname:
+            continue
+
+        data = f.read()
+        size = len(data)
+
+        if size > MAX:
+            results.append({
+                "name": fname, "ok": False,
+                "msg": f"文件 {size/1024/1024:.1f} MB 超过 25MB 上限，已跳过"
+            })
+            continue
+
+        path = (dir_path + "/" + fname) if dir_path else fname
+
+        # 检查是否已存在
+        existing_sha = ""
+        try:
+            rc, out, err = repo_ops._gh(token, ["api", f"/repos/{owner}/{repo}/contents/{path}"],
+                                        check=False)
+            if rc == 0 and out.strip():
+                try:
+                    d = json.loads(out)
+                    existing_sha = d.get("sha", "")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if existing_sha and not overwrite:
+            results.append({
+                "name": fname, "ok": False, "skipped": True,
+                "msg": "已存在，跳过"
+            })
+            continue
+
+        msg = commit_msg or (f"upload {fname}" if not existing_sha else f"update {fname}")
+        try:
+            repo_ops.upload_file_binary(token, owner, repo, path, data, msg, existing_sha or None)
+            results.append({
+                "name": fname, "ok": True, "path": path,
+                "msg": "已更新" if existing_sha else "已上传"
+            })
+        except Exception as e:
+            results.append({"name": fname, "ok": False, "msg": str(e)[:200]})
+
+    return jsonify({"results": results})
+
+
+@app.route("/api/repos/delete_file", methods=["POST"])
+@login_required
+def api_repo_delete_file():
+    data = request.get_json(silent=True) or {}
+    owner = (data.get("owner") or "").strip()
+    repo = (data.get("repo") or "").strip()
+    path = (data.get("path") or "").strip()
+    sha = (data.get("sha") or "").strip()
+
+    if not owner or not repo or not path:
+        return jsonify({"error": "缺少参数"}), 400
+    token = store.get_token()
+    if not token:
+        return jsonify({"error": "未配置 Token"}), 400
+
+    try:
+        result = repo_ops.delete_file(token, owner, repo, path, f"delete {path}", sha or None)
+        commit = (result.get("commit") or {}) if isinstance(result, dict) else {}
+        return jsonify({
+            "ok": True,
+            "commit_sha": commit.get("sha", ""),
+            "commit_url": commit.get("html_url", ""),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/repos/contents")

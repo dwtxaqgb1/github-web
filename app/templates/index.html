@@ -80,6 +80,7 @@
           <option value="docker">Dockerfile 语法检测（push 后跑一次 docker build 验证能不能构建，不推送镜像）</option>
           <option value="test-python">Python 自动测试（push 后跑 pytest，需要有测试文件）</option>
           <option value="test-node">Node 自动测试（push 后跑 npm test，需要有测试脚本）</option>
+          <option value="push-ghcr">构建并推送到 GHCR（GitHub 镜像仓库，别人可 docker pull）</option>
         </select>
         <div class="hint">模板文件会自动生成并加入源码后推送。若已存在同名文件会覆盖。<br>注意：Actions 只在 GitHub 服务器上跑检测，不会真的产出可下载的镜像或推送到镜像仓库。</div>
       </div>

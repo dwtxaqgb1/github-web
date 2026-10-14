@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block body %}
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+<div class="card">
+  <h2><span class="dot"></span>SSH 部署密钥（推荐，用于 git push）</h2>
+  {% if not ssh_ready %}
+    <p style="color:var(--muted);font-size:13px">还没有 SSH key，点下面按钮生成。</p>
+    <form method="post">
+      <input type="hidden" name="action" value="generate_ssh">
+      <button type="submit">生成 SSH 密钥</button>
+    </form>
+  {% else %}
+    <p style="color:var(--ok);font-size:13px">✓ SSH 密钥已就绪。把下面公钥加到 GitHub（只需一次）：</p>
+    <ol style="color:var(--muted);font-size:13px;padding-left:18px">
+      <li>打开 <a href="https://github.com/settings/keys" target="_blank">https://github.com/settings/keys</a></li>
+      <li>点 <b>New SSH key</b>，Title 随便填</li>
+      <li>把下面这一整行粘进 Key 框，保存</li>
+    </ol>
+    <textarea readonly style="min-height:70px;font-size:12px">{{ ssh_pubkey }}</textarea>
+    <div class="hint">加好后，git push 会自动走 SSH over 443，绕过 github.com:443 的丢包。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2><span class="dot"></span>GitHub 配置</h2>
+  <form method="post">
+    <input type="hidden" name="action" value="github">
+    <label style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+  <span>Personal Access Token {% if has_token %}<span style="color:var(--ok)">(已保存，留空则不修改)</span>{% endif %}</span>
+  <a href="https://github.com/settings/tokens/new?scopes=repo,workflow,delete_repo,read:user,read:org,write:packages,delete:packages&description=NAS%20gh-web%20tool"
+     target="_blank" rel="noopener"
+     style="font-size:12px;color:#60a5fa;font-weight:400">🔗 点这里生成 Token（自动预勾选）→</a>
+</label>
+    <input type="password" name="token" placeholder="{% if has_token %}留空保留原 Token{% else %}ghp_xxx 或 github_pat_xxx{% endif %}">
+    <div class="hint">Classic 需勾选：repo、workflow。Fine-grained 需：Contents RW、Administration RW、Releases RW、Pages RW、Workflows RW、Metadata R</div>
+    <label>GitHub 用户名</label>
+    <input type="text" name="username" value="{{ username }}" placeholder="你的 GitHub 用户名">
+    <label>默认 owner（用户或组织，留空则用用户名）</label>
+    <input type="text" name="owner" value="{{ owner }}" placeholder="可选">
+    <label>Release 加速下载地址（可选）</label>
+    <input type="text" name="accel_url" value="{{ accel_url }}" placeholder="https://github.dwtxaqgb.eu.org">
+    <div class="hint">填了之后，发布成功时会同时给出加速下载链接。留空则不生成。可以只填域名，会自动补 https://。</div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button type="submit" style="margin-top:0">保存 GitHub 配置</button>
+      <button type="button" class="ghost" style="margin-top:0" onclick="checkTokenScopes()">检测 Token 权限</button>
+    </div>
+  </form>
+  <div id="tokenScopesResult" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
+  <h2><span class="dot"></span>修改密码</h2>
+  <form method="post">
+    <input type="hidden" name="action" value="password">
+    <label>原密码</label>
+    <input type="password" name="old" required>
+    <label>新密码（≥6 位）</label>
+    <input type="password" name="new" required>
+    <label>确认新密码</label>
+    <input type="password" name="new2" required>
+    <button type="submit">修改密码</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function checkTokenScopes() {
+  const tokenInput = document.querySelector('input[name="token"]');
+  const out = document.getElementById('tokenScopesResult');
+  const hasToken = {{ 'true' if has_token else 'false' }};
+  let token = tokenInput.value.trim();
+  if (!token && hasToken) {
+    out.innerHTML = '<div class="msg err">请输入 Token 再检测（即使已保存过，需要重新输入一次才能检测）</div>';
+    return;
+  }
+  if (!token) {
+    out.innerHTML = '<div class="msg err">请先输入 Token</div>';
+    return;
+  }
+  out.innerHTML = '<div class="hint">检测中...</div>';
+  try {
+    const r = await fetch('/api/setup/check_token', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: token})
+    });
+    const j = await r.json();
+    if (j.error) { out.innerHTML = '<div class="msg err">' + j.error + '</div>'; return; }
+    if (!j.valid) {
+      out.innerHTML = '<div class="msg err">Token 无效：' + (j.errors || []).join('; ') + '</div>';
+      return;
+    }
+    const scopes = j.scopes || [];
+    const isFine = scopes.indexOf('fine-grained') >= 0;
+    const need = {
+      'repo': '仓库读写（发布代码、创建 Release、管理 Pages）',
+      'workflow': '提交 GitHub Actions 工作流',
+      'delete_repo': '删除仓库',
+      'read:user': '读取用户信息'
+    };
+    let html = '<div class="msg ok">✅ Token 有效，用户：<b>' + j.user + '</b></div>';
+    html += '<div class="card" style="margin-top:0;padding:14px;background:var(--card2)">';
+    html += '<div style="font-size:13px;color:#cbd5e1;margin-bottom:10px">权限检测：</div>';
+    if (isFine) {
+      html += '<div style="font-size:13px;color:#94a3b8">Fine-grained Token，无法自动读取权限列表。<br>请确保已勾选：Contents RW、Administration RW、Releases RW、Pages RW、Workflows RW、Metadata R、Profile R</div>';
+    } else {
+      Object.keys(need).forEach(function(k) {
+        const ok = scopes.indexOf(k) >= 0;
+        html += '<div style="font-size:13px;padding:3px 0;color:' + (ok ? '#34d399' : '#f87171') + '">' +
+                (ok ? '✅' : '❌') + ' <b>' + k + '</b> — ' + need[k] + '</div>';
+      });
+      html += '<div style="font-size:12px;color:#8b9cba;margin-top:10px">当前权限：' + (scopes.length ? scopes.join(', ') : '(无)') + '</div>';
+    }
+    html += '</div>';
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = '<div class="msg err">检测失败: ' + e.message + '</div>';
+  }
+}
+</script>
+{% endblock %}
+
+

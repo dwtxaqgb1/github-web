@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}GitHub 发布工具{% endblock %}</title>
+<style>
+:root{--bg:#0b1220;--card:#151f33;--card2:#1b2740;--border:#25334f;--text:#e2e8f0;--muted:#8b9cba;--brand:#3b82f6;--brand2:#2563eb;--ok:#10b981;--err:#ef4444;--warn:#f59e0b}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;overflow-x:hidden;width:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:#60a5fa;text-decoration:none}
+a:hover{text-decoration:underline}
+.topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;background:rgba(21,31,51,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.topbar h1{margin:0;font-size:14px;font-weight:600;letter-spacing:.3px;white-space:nowrap}
+.topbar nav{display:flex;gap:14px;font-size:13px;flex-wrap:wrap}
+.topbar nav a{color:var(--muted);position:relative;padding:4px 0;white-space:nowrap}
+.topbar nav a:hover{color:var(--text);text-decoration:none}
+.topbar nav a.active{color:#fff}
+.topbar nav a.active::after{content:"";position:absolute;left:0;right:0;bottom:-11px;height:2px;background:var(--brand)}
+.wrap{max-width:980px;margin:0 auto;padding:20px 16px 80px;width:100%}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.15);overflow:hidden}
+.card h2{margin:0 0 16px;font-size:15px;font-weight:600;color:#cbd5e1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card h2 .dot{width:6px;height:6px;background:var(--brand);border-radius:50%}
+label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+input[type=text],input[type=password],input[type=file],select,textarea{width:100%;max-width:100%;padding:10px 12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:inherit;transition:border-color .15s;min-width:0}
+input[type=file]{padding:8px 10px;overflow:hidden;text-overflow:ellipsis}
+input[type=text]:focus,input[type=password]:focus,select:focus,textarea:focus{border-color:var(--brand);outline:none}
+textarea{min-height:100px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+button{padding:10px 18px;background:var(--brand);color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;margin-top:14px;transition:background .15s}
+button:hover{background:var(--brand2)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+button.ghost:hover{background:var(--card2)}
+button.danger{background:var(--err)}
+button.danger:hover{background:#dc2626}
+.msg{padding:11px 14px;border-radius:8px;margin-bottom:16px;font-size:14px}
+.msg.ok{background:rgba(16,185,129,.12);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)}
+.msg.err{background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+pre.log{background:#050b17;border:1px solid #1e293b;border-radius:8px;padding:14px;font-size:12px;line-height:1.6;color:#94a3b8;overflow:auto;white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;max-width:100%}
+.hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+.row{display:flex;gap:14px}
+.row>*{flex:1;min-width:0}
+.badge{display:inline-block;padding:2px 8px;font-size:11px;border-radius:4px;font-weight:600;letter-spacing:.2px;white-space:nowrap}
+.badge.pending{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.running{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.success{background:rgba(16,185,129,.15);color:#34d399}
+.badge.failed{background:rgba(239,68,68,.15);color:#f87171}
+.badge.interrupted{background:rgba(139,92,246,.15);color:#a78bfa}
+.task-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--card2);margin-bottom:8px;font-size:13px;flex-wrap:wrap}
+.task-item .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:120px}
+.task-item .time{color:var(--muted);font-size:12px;white-space:nowrap}
+.task-item .actions{display:flex;gap:8px}
+.task-item .actions button{margin:0;padding:4px 10px;font-size:12px}
+.checkbox-row{display:flex;align-items:center;gap:8px;margin-top:14px}
+.checkbox-row input{width:auto;margin:0}
+.checkbox-row label{margin:0;color:var(--text);font-size:14px}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:20px}
+@media(max-width:640px){
+  .row{display:block}.row>*{margin-bottom:12px}
+  .card{padding:16px}
+  .wrap{padding:16px 12px 60px}
+  .task-item .time{display:none}
+  .topbar{padding:10px 12px}
+  .topbar h1{font-size:13px}
+  .topbar nav{gap:12px;font-size:12.5px}
+}
+
+/* repo-item */
+.repo-item{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:10px;background:var(--card2);margin-bottom:10px;border:1px solid var(--border)}
+@media(min-width:640px){.repo-item{flex-direction:row;align-items:center}}
+.repo-main{flex:1;min-width:0}
+.repo-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.repo-name{font-weight:600;font-size:14px}
+.repo-desc{color:var(--muted);font-size:13px;margin-top:4px;overflow:hidden;text-overflow:ellipsis}
+.repo-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--muted)}
+.repo-actions{display:flex;gap:6px;flex-wrap:wrap}
+.repo-actions button{margin:0;padding:5px 12px;font-size:12px}
+.repo-actions button.danger{background:transparent;border:1px solid var(--err);color:#fca5a5}
+.repo-actions button.danger:hover{background:rgba(239,68,68,.15)}
+
+/* 弹窗 */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px);animation:fadeIn .15s ease;overflow:hidden}
+.modal-box{background:var(--card);border:1px solid var(--border);border-radius:12px;width:100%;max-width:820px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:popIn .15s ease;min-width:0}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);font-weight:600;font-size:14px;color:#cbd5e1;flex-shrink:0}
+.modal-head .modal-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.modal-close{background:transparent;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 10px;margin:0;border-radius:6px;line-height:1;flex-shrink:0}
+.modal-close:hover{color:#fff;background:var(--card2)}
+.modal-back{background:transparent;border:1px solid var(--border);color:var(--text);font-size:12.5px;cursor:pointer;padding:5px 10px;margin:0;border-radius:6px;line-height:1.2;flex-shrink:0}
+.modal-back:hover{background:var(--card2)}
+.modal-box pre.log{border:0;border-radius:0;max-height:none;flex:1;overflow:auto;margin:0;min-height:0}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes popIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+
+/* modal extras */
+.modal-extras{padding:12px 16px;background:rgba(16,185,129,.06);border-bottom:1px solid var(--border);font-size:13px;flex-shrink:0;max-height:38%;overflow:auto;display:none}
+.modal-extras.show{display:block}
+.modal-extras .xrow{display:flex;align-items:flex-start;gap:10px;padding:4px 0;flex-wrap:wrap}
+.modal-extras .xlabel{color:var(--muted);min-width:72px;flex-shrink:0;font-size:12px}
+.modal-extras a{word-break:break-all;overflow-wrap:anywhere;font-size:12.5px}
+.modal-extras a.accel{color:#34d399;font-weight:500}
+.modal-extras .xname{color:var(--muted);font-size:11.5px;margin-left:4px}
+
+/* 步骤条 */
+.steps-bar{display:flex;align-items:center;gap:6px;padding:10px 16px;background:rgba(15,23,42,.6);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;font-size:12px}
+.step-item{display:flex;align-items:center;gap:6px;flex-shrink:0;color:var(--muted);white-space:nowrap}
+.step-dot{width:14px;height:14px;border-radius:50%;background:#334155;border:2px solid #334155;transition:all .2s;flex-shrink:0}
+.step-item.active{color:#60a5fa}
+.step-item.active .step-dot{background:var(--brand);border-color:var(--brand);animation:pulse 1.2s ease-in-out infinite}
+.step-item.done{color:#34d399}
+.step-item.done .step-dot{background:var(--ok);border-color:var(--ok)}
+.step-item.failed{color:#f87171}
+.step-item.failed .step-dot{background:var(--err);border-color:var(--err)}
+.step-conn{width:14px;height:2px;background:#334155;flex-shrink:0}
+.step-item.done + .step-conn{background:var(--ok)}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:.7}}
+@media(max-width:640px){.steps-bar{padding:8px 10px;font-size:11px;gap:4px}.step-dot{width:12px;height:12px}.step-conn{width:8px}}
+
+/* markdown 预览 */
+.md-preview{background:#0f172a;border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:10px;font-size:13.5px;line-height:1.7;color:var(--text);max-height:400px;overflow:auto}
+.md-preview h1,.md-preview h2,.md-preview h3{margin:12px 0 8px;color:#cbd5e1;line-height:1.3}
+.md-preview h1{font-size:18px;border-bottom:1px solid var(--border);padding-bottom:6px}
+.md-preview h2{font-size:16px}
+.md-preview h3{font-size:14px}
+.md-preview p{margin:6px 0}
+.md-preview code{background:#020617;padding:1px 5px;border-radius:4px;font-size:12px;color:#f472b6}
+.md-preview pre{background:#020617;padding:10px;border-radius:6px;overflow:auto;font-size:12px}
+.md-preview pre code{background:none;padding:0;color:#94a3b8}
+.md-preview ul,.md-preview ol{padding-left:22px;margin:6px 0}
+.md-preview li{margin:2px 0}
+.md-preview a{color:#60a5fa}
+.md-preview blockquote{border-left:3px solid var(--border);padding-left:10px;color:var(--muted);margin:8px 0}
+.md-preview table{border-collapse:collapse;margin:8px 0}
+.md-preview th,.md-preview td{border:1px solid var(--border);padding:5px 10px;font-size:12.5px}
+.md-preview img{max-width:100%}
+
+/* 文件列表 */
+.file-list{flex:1;overflow:auto;padding:6px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#050b17;min-height:0}
+.file-list .fitem{display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer;color:#cbd5e1;border-bottom:1px solid rgba(30,41,59,.5);user-select:none}
+.file-list .fitem:hover{background:rgba(59,130,246,.12)}
+.file-list .fitem .ficon{width:20px;text-align:center;flex-shrink:0}
+.file-list .fitem .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-list .fitem .fsize{color:#64748b;font-size:11.5px;flex-shrink:0}
+.file-list .fitem.dir .fname{color:#60a5fa}
+.file-list .fitem.back .fname{color:#fbbf24}
+.file-list .fitem .fdl{background:transparent;border:1px solid var(--border);color:var(--muted);cursor:pointer;border-radius:6px;padding:3px 10px;font-size:13px;line-height:1.2;margin:0;flex-shrink:0}
+.file-list .fitem .fdl:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
+.file-list .fitem.dir .fdl{display:none}
+
+/* release 列表 */
+.release-list{padding:8px 0}
+.release-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px}
+.release-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.release-tag{font-weight:700;font-size:15px;color:#60a5fa;font-family:ui-monospace,Menlo,Consolas,monospace}
+.release-time{color:var(--muted);font-size:12px}
+.release-badge{display:inline-block;padding:1px 8px;font-size:11px;border-radius:4px;font-weight:600}
+.release-badge.latest{background:rgba(16,185,129,.15);color:#34d399}
+.release-badge.pre{background:rgba(245,158,11,.15);color:#fbbf24}
+.release-body{color:#cbd5e1;font-size:13px;line-height:1.6;margin:6px 0;white-space:pre-wrap;max-height:120px;overflow:auto}
+.release-assets{margin:8px 0;border-top:1px solid var(--border);padding-top:8px}
+.asset-row{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12.5px;flex-wrap:wrap}
+.asset-row a{word-break:break-all;overflow-wrap:anywhere;flex:1;min-width:120px}
+.asset-row .asset-meta{color:var(--muted);font-size:11.5px;flex-shrink:0}
+.release-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+.release-actions button,.release-actions a.btn-link{margin:0;padding:5px 12px;font-size:12px;border-radius:6px;text-decoration:none;display:inline-block;line-height:1.4}
+.release-actions a.btn-link{background:transparent;border:1px solid var(--border);color:var(--text)}
+.release-actions a.btn-link:hover{background:var(--card);text-decoration:none}
+.release-actions button.rollback{background:transparent;border:1px solid #f59e0b;color:#fbbf24}
+.release-actions button.rollback:hover{background:rgba(245,158,11,.15)}
+
+@media(max-width:640px){
+  .modal-overlay{padding:8px}
+  .modal-box{max-height:94vh}
+  .modal-head{padding:12px 14px;font-size:13px}
+  .modal-box pre.log{font-size:11.5px;padding:12px}
+  .modal-extras{padding:10px 12px;font-size:12px}
+  .modal-extras .xlabel{min-width:60px}
+  .file-list .fitem{padding:10px 12px;font-size:12.5px}
+}
+
+.sync-badge{display:inline-block;padding:1px 8px;font-size:11px;border-radius:4px;background:rgba(59,130,246,.12);color:#93c5fd;white-space:nowrap}
+.sync-badge.active{background:rgba(167,139,250,.15);color:#c4b5fd}
+
+.sync-dialog-body{padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.sync-dialog-body label{margin:0;font-size:13px;color:var(--muted)}
+.sync-dialog-body select{padding:10px 12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px}
+.sync-dialog-status{margin-top:6px}
+.sync-status-row{padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.5}
+.sync-status-row.ok{background:rgba(16,185,129,.1);color:#6ee7b7;border:1px solid rgba(16,185,129,.25)}
+.sync-status-row.err{background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.25)}
+.sync-status-row.muted{background:rgba(139,156,186,.08);color:var(--muted);border:1px solid var(--border)}
+.sync-status-row .sync-msg{margin-top:6px;font-size:11.5px;color:inherit;opacity:.85;word-break:break-all;overflow-wrap:anywhere;white-space:pre-wrap}
+.sync-dialog-actions{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border);background:var(--card2)}
+.sync-dialog-actions button{flex:1;margin:0}
+
+.upload-progress{padding:14px 18px;border-bottom:1px solid var(--border);background:rgba(59,130,246,.06);flex-shrink:0;display:none}
+.upload-progress.show{display:block}
+.upload-progress .bar-wrap{height:8px;background:#1e293b;border-radius:4px;overflow:hidden;margin-top:8px}
+.upload-progress .bar{height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#60a5fa);border-radius:4px;transition:width .15s ease}
+.upload-progress .info{display:flex;justify-content:space-between;font-size:12.5px;color:#93c5fd;font-weight:500}
+.upload-progress .info .pct{font-weight:700;font-size:14px;color:#60a5fa}
+
+.modal-editor{flex:1;display:none;flex-direction:column;background:#050b17;min-height:0;overflow:hidden}
+.modal-editor.show{display:flex;min-height:70vh}
+.modal-editor .editor-toolbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card2);gap:10px;flex-wrap:wrap;flex-shrink:0}
+.modal-editor .editor-path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#93c5fd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.modal-editor .editor-actions{display:flex;gap:8px;flex-shrink:0}
+.modal-editor .editor-actions button{margin:0;padding:5px 12px;font-size:12px}
+.modal-editor textarea{flex:1;background:#050b17;color:#e2e8f0;border:0;padding:14px 16px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;resize:none;outline:none;min-height:300px;width:100%;display:block}
+@media(max-width:640px){.modal-editor.show{min-height:80vh}}
+
+.diff-view{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;background:#050b17;padding:0;overflow:auto;max-height:60vh}
+.diff-line{white-space:pre;padding:0 12px;min-height:19px}
+.diff-line.add{background:rgba(16,185,129,.09);color:#6ee7b7}
+.diff-line.del{background:rgba(239,68,68,.09);color:#fca5a5}
+.diff-line.hunk{background:rgba(59,130,246,.12);color:#93c5fd;font-weight:500;padding-top:2px;padding-bottom:2px}
+.diff-line.meta{color:#64748b;font-style:italic}
+.diff-line.ctx{color:#94a3b8}
+.diff-header{padding:10px 14px;background:var(--card2);border-bottom:1px solid var(--border);font-size:12.5px;color:#cbd5e1;display:flex;gap:14px;flex-wrap:wrap;flex-shrink:0}
+.diff-header .stat-add{color:#34d399;font-weight:600}
+.diff-header .stat-del{color:#f87171;font-weight:600}
+.diff-header .commit-msg{color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.diff-empty{padding:30px;text-align:center;color:#8b9cba;font-size:13px}
+.hist-list{padding:6px 0;overflow:auto;flex:1;min-height:0;background:#050b17}
+.hist-item{padding:10px 14px;border-bottom:1px solid rgba(30,41,59,.5);cursor:pointer;transition:background .12s}
+.hist-item:hover{background:rgba(59,130,246,.1)}
+.hist-item.expanded{background:rgba(59,130,246,.08)}
+.hist-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px}
+.hist-sha{font-family:ui-monospace,Menlo,Consolas,monospace;color:#60a5fa;font-weight:600;flex-shrink:0}
+.hist-msg{color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:150px}
+.hist-meta{color:#64748b;font-size:11.5px;flex-shrink:0}
+.hist-arrow{color:#64748b;font-size:11px;flex-shrink:0}
+
+.restore-btn{background:transparent;border:1px solid #f59e0b;color:#fbbf24;padding:3px 10px;font-size:11.5px;border-radius:5px;cursor:pointer;margin-left:auto;flex-shrink:0}
+.restore-btn:hover{background:rgba(245,158,11,.15)}
+.restore-btn:disabled{opacity:.4;cursor:not-allowed}
+.hist-row .hist-actions{display:flex;gap:6px;flex-shrink:0;margin-left:auto}
+
+.readme-dialog-body{flex:1;display:flex;flex-direction:column;min-height:0;background:#050b17;overflow:hidden}
+.readme-dialog-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card2);flex-shrink:0;flex-wrap:wrap}
+.readme-dialog-toolbar .info{font-size:12.5px;color:#93c5fd}
+.readme-dialog-toolbar button{margin:0;padding:5px 12px;font-size:12px}
+.readme-dialog-body textarea{flex:1;background:#050b17;color:#e2e8f0;border:0;padding:14px 16px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;resize:none;outline:none;min-height:400px;width:100%;display:block}
+.readme-dialog-actions{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border);background:var(--card2);flex-shrink:0}
+.readme-dialog-actions button{flex:1;margin:0}
+@media(max-width:640px){.readme-dialog-body textarea{min-height:55vh;font-size:12.5px}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>GitHub 发布工具</h1>
+  <nav>
+    <a href="{{ url_for('index') }}" {% if request.endpoint=='index' %}class="active"{% endif %}>首页</a>
+    <a href="{{ url_for('repos_page') }}" {% if request.endpoint=='repos_page' %}class="active"{% endif %}>项目</a>
+    <a href="{{ url_for('tasks') }}" {% if request.endpoint=='tasks' %}class="active"{% endif %}>任务</a>
+    <a href="{{ url_for('setup') }}" {% if request.endpoint=='setup' %}class="active"{% endif %}>设置</a>
+    <a href="{{ url_for('logout') }}">退出</a>
+  </nav>
+</div>
+<div class="wrap">
+{% block body %}{% endblock %}
+</div>
+
+<div id="modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <button class="modal-back" type="button" id="modalBackBtn" onclick="modalBack()" style="display:none">← 返回</button>
+      <button class="modal-back" type="button" id="modalEditBtn" onclick="startEditFromPreview()" style="display:none">✏ 编辑</button>
+      <button class="modal-back" type="button" id="modalHistoryBtn" onclick="showFileHistory()" style="display:none">📜 历史</button>
+      <span class="modal-title" id="modalTitle">日志</span>
+      <button class="modal-close" type="button" onclick="closeModal()" aria-label="关闭">✕</button>
+    </div>
+    <div class="steps-bar" id="modalSteps" style="display:none"></div>
+    <div class="upload-progress" id="uploadProgress">
+      <div class="info"><span id="uploadLabel">正在上传</span><span class="pct" id="uploadPct">0%</span></div>
+      <div class="bar-wrap"><div class="bar" id="uploadBar"></div></div>
+      <div class="info" style="margin-top:6px;color:#8b9cba;font-weight:400"><span id="uploadBytes"></span><span id="uploadSpeed"></span></div>
+    </div>
+    <div id="modalExtras" class="modal-extras"></div>
+    <pre class="log" id="modalLog">加载中...</pre>
+    <div class="file-list" id="modalFileList" style="display:none"></div>
+
+    <div class="modal-editor" id="modalEditor">
+      <div class="editor-toolbar">
+        <span class="editor-path" id="editorPath"></span>
+        <span class="editor-actions">
+          <button class="ghost" type="button" onclick="cancelEdit()">取消</button>
+          <button type="button" onclick="saveEdit()" id="saveEditBtn">保存</button>
+        </span>
+      </div>
+      <textarea id="editorTextarea" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+
+<div id="syncDialog" class="modal-overlay" style="display:none;z-index:200"></div>
+
+<script>
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+window.onModalBack = null;
+function modalBack() {
+  if (typeof window.onModalBack === 'function') window.onModalBack();
+}
+function showBackBtn(show) {
+  var b = document.getElementById('modalBackBtn');
+  if (b) b.style.display = show ? 'inline-block' : 'none';
+}
+
+
+function showUploadProgress(loaded, total, startTime) {
+  var el = document.getElementById('uploadProgress');
+  if (!el) return;
+  el.className = 'upload-progress show';
+  var pct = total > 0 ? Math.round(loaded / total * 100) : 0;
+  document.getElementById('uploadPct').textContent = pct + '%';
+  document.getElementById('uploadBar').style.width = pct + '%';
+  var mb = (loaded / 1024 / 1024).toFixed(1);
+  var totalMb = (total / 1024 / 1024).toFixed(1);
+  document.getElementById('uploadBytes').textContent = mb + ' / ' + totalMb + ' MB';
+  if (startTime) {
+    var elapsed = (Date.now() - startTime) / 1000;
+    if (elapsed > 0.3) {
+      var speed = (loaded / elapsed / 1024 / 1024).toFixed(1);
+      document.getElementById('uploadSpeed').textContent = speed + ' MB/s';
+    }
+  }
+  if (pct >= 100) {
+    document.getElementById('uploadLabel').textContent = '上传完成，正在处理';
+  } else {
+    document.getElementById('uploadLabel').textContent = '正在上传';
+  }
+}
+
+function hideUploadProgress() {
+  var el = document.getElementById('uploadProgress');
+  if (el) el.className = 'upload-progress';
+}
+
+
+var _editCtx = {owner: '', repo: '', path: '', sha: '', content: ''};
+
+function showEditBtn(show) {
+  var b = document.getElementById('modalEditBtn');
+  if (b) b.style.display = show ? 'inline-block' : 'none';
+}
+
+function startEditFromPreview() {
+  if (!window._lastFileData) return;
+  var d = window._lastFileData;
+  _editCtx = {owner: d.owner, repo: d.repo, path: d.path, sha: d.sha, content: d.content};
+  document.getElementById('editorPath').textContent = d.path;
+  document.getElementById('editorTextarea').value = d.content;
+  // 切换视图
+  document.getElementById('modalLog').style.display = 'none';
+  document.getElementById('modalFileList').style.display = 'none';
+  var ex = document.getElementById('modalExtras');
+  if (ex) ex.className = 'modal-extras';
+  document.getElementById('modalSteps').style.display = 'none';
+  document.getElementById('modalEditor').className = 'modal-editor show';
+  document.getElementById('modalEditBtn').style.display = 'none';
+  // 光标定位
+  var ta = document.getElementById('editorTextarea');
+  ta.focus();
+  ta.setSelectionRange(0, 0);
+}
+
+function cancelEdit() {
+  document.getElementById('modalEditor').className = 'modal-editor';
+  document.getElementById('modalLog').style.display = 'block';
+  if (window._lastFileData) showEditBtn(true);
+}
+
+async function saveEdit() {
+  var content = document.getElementById('editorTextarea').value;
+  if (content === _editCtx.content) {
+    cancelEdit();
+    return;
+  }
+  var message = prompt('提交信息（commit message）：', 'update ' + _editCtx.path);
+  if (message === null) return;
+  if (!message.trim()) message = 'update ' + _editCtx.path;
+
+  var btn = document.getElementById('saveEditBtn');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+
+  try {
+    var r = await fetch('/api/repos/save_file', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        owner: _editCtx.owner,
+        repo: _editCtx.repo,
+        path: _editCtx.path,
+        content: content,
+        sha: _editCtx.sha,
+        message: message.trim()
+      })
+    });
+    var j = await r.json();
+    if (j.error) {
+      alert('保存失败: ' + j.error);
+      return;
+    }
+    // 更新缓存
+    _editCtx.content = content;
+    if (window._lastFileData) {
+      window._lastFileData.content = content;
+    }
+    // 回预览
+    document.getElementById('modalEditor').className = 'modal-editor';
+    document.getElementById('modalLog').style.display = 'block';
+    showEditBtn(true);
+    // 重新渲染
+    if (typeof window._reloadPreview === 'function') window._reloadPreview();
+    var tip = j.commit_url ? ('\n\n提交：' + j.commit_url) : '';
+    setTimeout(function() {
+      var log = document.getElementById('modalLog');
+      log.innerHTML += '<div style="margin-top:14px;padding-top:10px;border-top:1px solid #1e293b;color:#34d399">✅ 已保存' + tip + '</div>';
+    }, 100);
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
+  }
+}
+
+
+var _histCtx = {owner: '', repo: '', path: '', expanded: null};
+
+function showHistoryBtn(show) {
+  var b = document.getElementById('modalHistoryBtn');
+  if (b) b.style.display = show ? 'inline-block' : 'none';
+}
+
+async function showFileHistory() {
+  if (!window._lastFileData) return;
+  var d = window._lastFileData;
+  _histCtx = {owner: d.owner, repo: d.repo, path: d.path, expanded: null};
+
+  // 切到日志视图
+  document.getElementById('modalEditor').className = 'modal-editor';
+  document.getElementById('modalFileList').style.display = 'none';
+  document.getElementById('modalSteps').style.display = 'none';
+  document.getElementById('modalLog').style.display = 'block';
+  document.getElementById('modalLog').innerHTML = '<div class="diff-empty">加载提交历史...</div>';
+  showEditBtn(false);
+  showHistoryBtn(false);
+
+  try {
+    var r = await fetch('/api/repos/file_history?owner=' + encodeURIComponent(d.owner) +
+                        '&repo=' + encodeURIComponent(d.repo) +
+                        '&path=' + encodeURIComponent(d.path));
+    var j = await r.json();
+    if (j.empty_repo) {
+      document.getElementById('modalLog').innerHTML = '<div class="diff-empty">这个文件还没有提交历史（仓库为空或文件未被提交过）</div>';
+      return;
+    }
+    if (j.error) { document.getElementById('modalLog').innerHTML = '<div class="diff-empty">错误: ' + escHtml(j.error) + '</div>'; return; }
+    renderHistory(j.commits || []);
+  } catch (e) {
+    document.getElementById('modalLog').innerHTML = '<div class="diff-empty">加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function renderHistory(commits) {
+  var el = document.getElementById('modalLog');
+  if (!commits.length) {
+    el.innerHTML = '<div class="diff-empty">还没有任何提交历史</div>';
+    return;
+  }
+  var html = '<div class="hist-list">';
+  commits.forEach(function(c) {
+    var key = c.sha;
+    var expanded = _histCtx.expanded === key;
+    html += '<div class="hist-item' + (expanded ? ' expanded' : '') + '" id="hist-' + key + '">' +
+      '<div class="hist-row">' +
+        '<span class="hist-arrow" onclick="toggleCommit(\'' + key + '\')">' + (expanded ? '▼' : '▶') + '</span>' +
+        '<span class="hist-sha" onclick="toggleCommit(\'' + key + '\')">' + escHtml(c.short) + '</span>' +
+        '<span class="hist-msg" onclick="toggleCommit(\'' + key + '\')">' + escHtml(c.message) + '</span>' +
+        '<span class="hist-meta">' + escHtml(c.author) + ' · ' + escHtml(c.date) + '</span>' +
+        '<span class="hist-actions">' +
+          '<button class="restore-btn" type="button" onclick="event.stopPropagation(); restoreFile(\'' + key + '\')">↺ 恢复到此版本</button>' +
+        '</span>' +
+      '</div>' +
+      (expanded ? '<div class="diff-wrap" id="diff-' + key + '"><div class="diff-empty">加载差异...</div></div>' : '') +
+    '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function toggleCommit(sha) {
+  // 如果已经展开 → 收起
+  if (_histCtx.expanded === sha) {
+    _histCtx.expanded = null;
+    // 重新渲染（保持滚动位置太复杂，直接重渲染）
+    var r2 = await fetch('/api/repos/file_history?owner=' + encodeURIComponent(_histCtx.owner) +
+                        '&repo=' + encodeURIComponent(_histCtx.repo) +
+                        '&path=' + encodeURIComponent(_histCtx.path));
+    var j2 = await r2.json();
+    renderHistory(j2.commits || []);
+    return;
+  }
+  _histCtx.expanded = sha;
+  // 展开前先重新渲染结构
+  var r = await fetch('/api/repos/file_history?owner=' + encodeURIComponent(_histCtx.owner) +
+                      '&repo=' + encodeURIComponent(_histCtx.repo) +
+                      '&path=' + encodeURIComponent(_histCtx.path));
+  var j = await r.json();
+  renderHistory(j.commits || []);
+  // 再加载 diff
+  loadDiff(sha);
+}
+
+async function loadDiff(sha) {
+  var wrap = document.getElementById('diff-' + sha);
+  if (!wrap) return;
+  try {
+    var r = await fetch('/api/repos/file_diff?owner=' + encodeURIComponent(_histCtx.owner) +
+                        '&repo=' + encodeURIComponent(_histCtx.repo) +
+                        '&path=' + encodeURIComponent(_histCtx.path) +
+                        '&sha=' + encodeURIComponent(sha));
+    var j = await r.json();
+    if (j.error) { wrap.innerHTML = '<div class="diff-empty">' + escHtml(j.error) + '</div>'; return; }
+    wrap.innerHTML = renderDiff(j);
+  } catch (e) {
+    wrap.innerHTML = '<div class="diff-empty">加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function renderDiff(d) {
+  var html = '<div class="diff-header">' +
+    '<span>状态: <b>' + escHtml(d.status) + '</b></span>' +
+    '<span class="stat-add">+' + (d.additions || 0) + '</span>' +
+    '<span class="stat-del">-' + (d.deletions || 0) + '</span>' +
+    '<span class="commit-msg">' + escHtml((d.message || '').split('\n')[0]) + '</span>' +
+  '</div>';
+  if (!d.patch) {
+    html += '<div class="diff-empty">无差异内容（可能是二进制文件或改动过大被 GitHub 截断）</div>';
+    return html;
+  }
+  var lines = d.patch.split('\n');
+  html += '<div class="diff-view">';
+  lines.forEach(function(line) {
+    var cls = 'diff-line ctx';
+    if (line.indexOf('@@') === 0) cls = 'diff-line hunk';
+    else if (line.indexOf('+++') === 0 || line.indexOf('---') === 0) cls = 'diff-line meta';
+    else if (line.indexOf('+') === 0) cls = 'diff-line add';
+    else if (line.indexOf('-') === 0) cls = 'diff-line del';
+    html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+
+async function restoreFile(sha) {
+  if (!_histCtx.owner || !_histCtx.repo || !_histCtx.path) return;
+  var shortSha = sha.slice(0, 7);
+  var confirmed = confirm(
+    '⚠️ 恢复文件到旧版本\n\n' +
+    '文件：' + _histCtx.path + '\n' +
+    '目标 commit：' + shortSha + '\n\n' +
+    '会把该文件当前内容替换成这个旧版本的内容，并提交一次新的 commit。\n' +
+    '其他文件不受影响。\n\n' +
+    '确认恢复？'
+  );
+  if (!confirmed) return;
+  try {
+    var r = await fetch('/api/repos/restore_file', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        owner: _histCtx.owner,
+        repo: _histCtx.repo,
+        path: _histCtx.path,
+        sha: sha
+      })
+    });
+    var j = await r.json();
+    if (j.error) { alert('恢复失败: ' + j.error); return; }
+    var msg = '✅ 已恢复到 ' + shortSha;
+    if (j.commit_url) msg += '\n\n新提交：' + j.commit_url;
+    alert(msg);
+    // 刷新历史
+    showFileHistory();
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  }
+}
+
+function backToFilePreview() {
+  document.getElementById('modalLog').style.display = 'none';
+  if (typeof window._reloadPreview === 'function') window._reloadPreview();
+}
+
+function openModal(title, content) {
+  document.getElementById('modalTitle').textContent = title || '日志';
+  document.getElementById('modalLog').textContent = content || '';
+  var _log = document.getElementById('modalLog');
+  if (_log) _log.style.display = 'block';
+  var _fl = document.getElementById('modalFileList');
+  if (_fl) { _fl.style.display = 'none'; _fl.innerHTML = ''; }
+  var _ed = document.getElementById('modalEditor');
+  if (_ed) _ed.className = 'modal-editor';
+  var _eb = document.getElementById('modalEditBtn');
+  if (_eb) _eb.style.display = 'none';
+  var _hb = document.getElementById('modalHistoryBtn');
+  if (_hb) _hb.style.display = 'none';
+  var _hb = document.getElementById('modalHistoryBtn');
+  if (_hb) _hb.style.display = 'none';
+  var _up = document.getElementById('uploadProgress');
+  if (_up) _up.className = 'upload-progress';
+  var _steps = document.getElementById('modalSteps');
+  if (_steps) { _steps.style.display = 'none'; _steps.innerHTML = ''; }
+  var _bb = document.getElementById('modalBackBtn');
+  if (_bb) _bb.style.display = 'none';
+  var ex = document.getElementById('modalExtras');
+  if (ex) { ex.className = 'modal-extras'; ex.innerHTML = ''; }
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+}
+
+function renderLog(text) {
+  var el = document.getElementById('modalLog');
+  if (!el) return;
+  el.style.display = 'block';
+  var fl = document.getElementById('modalFileList');
+  if (fl) fl.style.display = 'none';
+  var escaped = escHtml(text == null ? '' : text);
+  var linked = escaped.replace(/(https?:\/\/[^\s<>"']+)/g, function(u) {
+    return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>';
+  });
+  el.innerHTML = linked;
+}
+
+function renderExtras(extras) {
+  var el = document.getElementById('modalExtras');
+  if (!el) return;
+  if (!extras) { el.className = 'modal-extras'; el.innerHTML = ''; return; }
+  var hasAny = extras.repo_url || extras.release_url || extras.pages_url ||
+               (extras.assets && extras.assets.length);
+  if (!hasAny) { el.className = 'modal-extras'; el.innerHTML = ''; return; }
+  var html = '';
+  if (extras.repo_url) {
+    html += '<div class="xrow"><span class="xlabel">仓库</span><a href="' +
+            escHtml(extras.repo_url) + '" target="_blank" rel="noopener">' +
+            escHtml(extras.repo_url) + '</a></div>';
+  }
+  if (extras.release_url) {
+    html += '<div class="xrow"><span class="xlabel">Release</span><a href="' +
+            escHtml(extras.release_url) + '" target="_blank" rel="noopener">' +
+            escHtml(extras.release_url) + '</a></div>';
+  }
+  if (extras.pages_url) {
+    html += '<div class="xrow"><span class="xlabel">Pages</span><a href="' +
+            escHtml(extras.pages_url) + '" target="_blank" rel="noopener">' +
+            escHtml(extras.pages_url) + '</a></div>';
+  }
+  if (extras.assets && extras.assets.length) {
+    extras.assets.forEach(function(a) {
+      var url = a.accel || a.url;
+      var cls = a.accel ? 'accel' : '';
+      var label = a.accel ? '加速下载' : '下载';
+      html += '<div class="xrow"><span class="xlabel">' + label + '</span>' +
+              '<a class="' + cls + '" href="' + escHtml(url) +
+              '" target="_blank" rel="noopener">' + escHtml(url) + '</a>' +
+              (a.name ? '<span class="xname">(' + escHtml(a.name) + ')</span>' : '') +
+              '</div>';
+    });
+  }
+  el.innerHTML = html;
+  el.className = 'modal-extras show';
+}
+
+var STEP_ORDER = ['create_repo', 'push_source', 'create_release', 'deploy_pages'];
+var STEP_LABELS = {create_repo:'建仓库', push_source:'推代码', create_release:'建 Release', deploy_pages:'部署 Pages'};
+
+function renderSteps(currentStep, status) {
+  var el = document.getElementById('modalSteps');
+  if (!el) return;
+  el.style.display = 'flex';
+  if (currentStep === 'done' || status === 'success') {
+    var html = '';
+    STEP_ORDER.forEach(function(k, i) {
+      if (i > 0) html += '<span class="step-conn"></span>';
+      html += '<div class="step-item done"><span class="step-dot"></span><span>' + STEP_LABELS[k] + '</span></div>';
+    });
+    el.innerHTML = html;
+    return;
+  }
+  var idx = STEP_ORDER.indexOf(currentStep);
+  if (idx < 0) { el.style.display = 'none'; return; }
+  var html = '';
+  STEP_ORDER.forEach(function(k, i) {
+    if (i > 0) html += '<span class="step-conn"></span>';
+    var cls = 'step-item';
+    if (i < idx) cls += ' done';
+    else if (i === idx) cls += (status === 'failed' ? ' failed' : ' active');
+    html += '<div class="' + cls + '"><span class="step-dot"></span><span>' + STEP_LABELS[k] + '</span></div>';
+  });
+  el.innerHTML = html;
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  var m = document.getElementById('modal');
+  if (m) m.addEventListener('click', function (e) {
+    if (e.target.id === 'modal') closeModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeModal();
+  });
+});
+</script>
+{% block scripts %}{% endblock %}
+</div>
+
+<div id="readmeDialog" class="modal-overlay" style="display:none;z-index:200">
+  <div class="modal-box" style="max-width:900px">
+    <div class="modal-head">
+      <span class="modal-title" id="readmeTitle">生成 README</span>
+      <button class="modal-close" type="button" onclick="closeReadmeDialog()" aria-label="关闭">✕</button>
+    </div>
+    <div class="readme-dialog-body">
+      <div class="readme-dialog-toolbar">
+        <span class="info" id="readmeInfo">加载中...</span>
+        <button class="ghost" type="button" onclick="regenerateReadme()">🔄 重新生成</button>
+      </div>
+      <textarea id="readmeTextarea" spellcheck="false"></textarea>
+    </div>
+    <div class="readme-dialog-actions">
+      <button class="ghost" type="button" onclick="closeReadmeDialog()">取消</button>
+      <button type="button" onclick="saveReadmeToRepo()" id="readmeSaveBtn">保存到仓库</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

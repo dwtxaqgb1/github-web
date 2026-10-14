@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}任务历史{% endblock %}
+{% block body %}
+<div class="card">
+  <h2><span class="dot"></span>任务历史
+    <button class="ghost" type="button" style="margin-left:auto;font-size:12px;padding:4px 12px"
+            onclick="cleanup()">清理暂存文件</button>
+  </h2>
+  {% if tasks %}
+    {% set _sm = {"pending":"待执行","running":"运行中","success":"成功","failed":"失败","interrupted":"已中断"} %}
+    {% for t in tasks %}
+    <div class="task-item">
+      <span class="badge {{ t.status }}">{{ _sm.get(t.status, t.status) }}</span>
+      <span class="name">{{ t.name }}</span>
+      <span class="time">{{ t.created }}</span>
+      <span class="actions">
+        <button class="ghost" type="button" onclick="viewLog('{{ t.id }}', '{{ t.name }}')">日志</button>
+        <button class="ghost" type="button" onclick="del('{{ t.id }}')">删除</button>
+      </span>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">暂无任务</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const STATUS_CN = {pending:'待执行',running:'运行中',success:'成功',failed:'失败',interrupted:'已中断'};
+
+async function viewLog(tid, name) {
+  openModal('日志 - ' + name, '加载中...');
+  try {
+    const r = await fetch('/api/task/' + tid);
+    const j = await r.json();
+    if (j.task) {
+      renderLog('状态: ' + (STATUS_CN[j.task.status] || j.task.status) + '\n\n' + (j.log || ''));
+      if (j.task.status === 'success' && j.task.extras) {
+        renderExtras(j.task.extras);
+      }
+    }
+  } catch (e) {
+    renderLog('加载失败: ' + e.message);
+  }
+}
+
+async function del(tid) {
+  if (!confirm('确认删除该任务（含日志和暂存文件）？')) return;
+  const r = await fetch('/api/tasks/delete/' + tid, {method: 'POST'});
+  const j = await r.json();
+  if (j.error) { alert(j.error); return; }
+  location.reload();
+}
+
+async function cleanup() {
+  if (!confirm('清理所有非运行任务的暂存文件？')) return;
+  const r = await fetch('/api/cleanup', {method: 'POST'});
+  const j = await r.json();
+  alert('已删除 ' + j.removed + ' 个目录，释放 ' + j.freed_mb + ' MB');
+}
+</script>
+{% endblock %}

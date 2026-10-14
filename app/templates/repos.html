@@ -1,0 +1,668 @@
+{% extends "base.html" %}
+{% block title %}项目列表{% endblock %}
+{% block body %}
+{% if not has_token %}
+<div class="msg err">还没配置 GitHub Token，请先到 <a href="{{ url_for('setup') }}">设置</a>。</div>
+{% endif %}
+
+<div class="card">
+  <h2><span class="dot"></span>我的项目（{{ owner }}）
+    <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="ghost" type="button" style="font-size:12px;padding:4px 12px"
+              onclick="forkAnyRepo()">Fork 别人的仓库</button>
+      <button class="ghost" type="button" style="font-size:12px;padding:4px 12px"
+              onclick="loadRepos()">刷新</button>
+    </span>
+  </h2>
+  <div style="margin-bottom:12px">
+    <input type="text" id="searchBox" placeholder="搜索项目名称或描述..." oninput="filterRepos()">
+  </div>
+  <div id="repoList"><div class="empty">加载中...</div></div>
+</div>
+
+<div id="syncDialog" class="modal-overlay" style="display:none;z-index:200">
+  <div class="modal-box" style="max-width:440px">
+    <div class="modal-head">
+      <span class="modal-title" id="syncDialogTitle">自动同步</span>
+      <button class="modal-close" type="button" onclick="closeSyncDialog()" aria-label="关闭">✕</button>
+    </div>
+    <div class="sync-dialog-body">
+      <label>同步频率</label>
+      <select id="syncIntervalSelect">
+        <option value="off">关闭（只手动点「同步」）</option>
+        <option value="1h">每小时</option>
+        <option value="6h">每 6 小时</option>
+        <option value="12h">每 12 小时</option>
+        <option value="1d">每天（推荐）</option>
+        <option value="3d">每 3 天</option>
+        <option value="1w">每周</option>
+      </select>
+      <div class="hint">后台每分钟检查一次，到点自动从上游拉取更新。有冲突会失败并记录状态。</div>
+      <div id="syncDialogStatus" class="sync-dialog-status"></div>
+    </div>
+    <div class="sync-dialog-actions">
+      <button class="ghost" type="button" onclick="closeSyncDialog()">取消</button>
+      <button type="button" onclick="saveSyncConfig()">保存</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allRepos = [];
+let _pollTimers = {};
+let _releasesCtx = {owner: '', repo: '', accel_base: ''};
+let fileCtx = {owner: '', repo: '', path: '', branch: 'main', accel_base: '', isPrivate: false};
+let _syncCache = null;
+let _syncDialogCtx = {owner: '', name: ''};
+let _sysInfo = null;
+
+function jsStr(s) {
+  return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+function fmtSize(kb) {
+  if (!kb) return '0 KB';
+  if (kb < 1024) return kb + ' KB';
+  return (kb / 1024).toFixed(1) + ' MB';
+}
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+function intervalLabel(k) {
+  return { '1h':'每小时','6h':'每 6 小时','12h':'每 12 小时','1d':'每天','3d':'每 3 天','1w':'每周' }[k] || k;
+}
+
+function renderRepos(list) {
+  const el = document.getElementById('repoList');
+  if (!list.length) { el.innerHTML = '<div class="empty">没有匹配的项目</div>'; return; }
+  let html = '';
+  list.forEach(function(repo) {
+    const vis = repo.private ? '<span class="badge pending">私有</span>' : '<span class="badge success">公开</span>';
+    const arc = repo.archived ? '<span class="badge interrupted">已归档</span>' : '';
+    const fork = repo.fork ? '<span class="badge running">Fork</span>' : '';
+    const lang = repo.language ? '<span class="time">' + escHtml(repo.language) + '</span>' : '';
+    const stars = repo.stars ? '<span class="time">⭐ ' + repo.stars + '</span>' : '';
+    let forkBtns = '';
+    if (repo.fork) {
+      forkBtns =
+        '<button class="ghost" type="button" style="border-color:#60a5fa;color:#93c5fd" onclick="syncFork(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">同步</button>' +
+        '<button class="ghost" type="button" style="border-color:#a78bfa;color:#c4b5fd" onclick="syncConfig(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">自动</button>';
+    }
+    html += '<div class="repo-item"><div class="repo-main">' +
+      '<div class="repo-title">' +
+        '<a href="' + escHtml(repo.url) + '" target="_blank" rel="noopener" class="repo-name">' + escHtml(repo.name) + '</a>' +
+        vis + arc + fork +
+      '</div>' +
+      (repo.description ? '<div class="repo-desc">' + escHtml(repo.description) + '</div>' : '') +
+      '<div class="repo-meta">' + lang + stars +
+        '<span class="time">更新: ' + escHtml(repo.updated) + '</span>' +
+        '<span class="time">' + fmtSize(repo.size_kb) + '</span>' +
+        syncBadgeHtml(repo) +
+      '</div></div>' +
+      '<div class="repo-actions">' +
+        '<button class="ghost" type="button" onclick="viewFiles(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\', ' + (repo.private ? 'true' : 'false') + ')">文件</button>' +
+        '<button class="ghost" type="button" style="border-color:#10b981;color:#34d399" onclick="newVersion(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">发布新版本</button>' +
+        '<button class="ghost" type="button" style="border-color:#a78bfa;color:#c4b5fd" onclick="generateReadme(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">生成 README</button>' +
+        '<button class="ghost" type="button" onclick="showReleases(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">版本</button>' +
+        '<button class="ghost" type="button" onclick="cloneRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', \'' + jsStr(repo.branch) + '\')">克隆</button>' +
+        forkBtns +
+        '<button class="ghost" type="button" onclick="renameRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">重命名</button>' +
+        '<button class="ghost" type="button" onclick="toggleArchive(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\', ' + (repo.archived ? 'false' : 'true') + ')">' + (repo.archived ? '取消归档' : '归档') + '</button>' +
+        '<button class="ghost danger" type="button" onclick="deleteRepo(\'' + jsStr(repo.owner) + '\', \'' + jsStr(repo.name) + '\')">删除</button>' +
+      '</div></div>';
+  });
+  el.innerHTML = html;
+}
+
+function filterRepos() {
+  const q = (document.getElementById('searchBox').value || '').trim().toLowerCase();
+  if (!q) { renderRepos(allRepos); return; }
+  const filtered = allRepos.filter(function(r) {
+    return r.name.toLowerCase().indexOf(q) >= 0 ||
+           (r.description || '').toLowerCase().indexOf(q) >= 0 ||
+           (r.language || '').toLowerCase().indexOf(q) >= 0;
+  });
+  renderRepos(filtered);
+}
+
+async function loadRepos() {
+  const el = document.getElementById('repoList');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    await loadSyncStatus();
+    const r = await fetch('/api/repos');
+    const j = await r.json();
+    if (j.error) { el.innerHTML = '<div class="msg err">' + escHtml(j.error) + '</div>'; return; }
+    allRepos = j.repos || [];
+    filterRepos();
+  } catch (e) {
+    el.innerHTML = '<div class="msg err">加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function syncBadgeHtml(repo) {
+  if (!repo.fork) return '';
+  if (!_syncCache) return '<span class="sync-badge">🔄 fork</span>';
+  const key = repo.owner + '/' + repo.name;
+  const cfg = _syncCache[key];
+  if (!cfg) return '<span class="sync-badge">🔄 fork · 未自动同步</span>';
+  if (!cfg.enabled) {
+    if (cfg.last_sync) return '<span class="sync-badge">🔄 手动 · 上次 ' + escHtml(String(cfg.last_sync).slice(5, 16)) + '</span>';
+    return '<span class="sync-badge">🔄 fork · 未自动同步</span>';
+  }
+  let label = '⏰ ' + intervalLabel(cfg.interval || '1d');
+  if (cfg.last_sync) {
+    label += ' · 上次 ' + escHtml(String(cfg.last_sync).slice(5, 16));
+    if (cfg.last_result === 'err') label += ' ❌';
+  }
+  return '<span class="sync-badge active">' + label + '</span>';
+}
+
+async function loadSyncStatus() {
+  try {
+    const r = await fetch('/api/repos/sync_status');
+    const j = await r.json();
+    _syncCache = j.all || {};
+  } catch (e) { _syncCache = {}; }
+}
+
+async function syncFork(owner, name) {
+  if (!confirm('同步 ' + owner + '/' + name + '？\n\n会从上游拉取最新代码合并到你的 fork。\n如果有冲突会失败。')) return;
+  openModal('同步 ' + owner + '/' + name, '正在创建任务...');
+  try {
+    const r = await fetch('/api/repos/sync', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, name: name})
+    });
+    const j = await r.json();
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+    pollTask(j.task_id, async function(t) {
+      if (t.status === 'success') {
+        await loadSyncStatus();
+        renderLog('✅ 同步完成\n\n' + (t.extras && t.extras.message ? t.extras.message : '') +
+                  '\n\n仓库：' + (t.extras && t.extras.repo_url ? t.extras.repo_url : ''));
+      }
+    });
+  } catch (e) { renderLog('请求失败: ' + e.message); }
+}
+
+async function syncConfig(owner, name) {
+  _syncDialogCtx = {owner: owner, name: name};
+  let cfg = {};
+  try {
+    const r = await fetch('/api/repos/sync_config?owner=' + encodeURIComponent(owner) + '&name=' + encodeURIComponent(name));
+    const j = await r.json();
+    cfg = j.config || {};
+  } catch (e) {}
+  document.getElementById('syncIntervalSelect').value = cfg.enabled ? (cfg.interval || '1d') : 'off';
+  let statusHtml = '';
+  if (cfg.last_sync) {
+    const ok = cfg.last_result !== 'err';
+    const timeStr = String(cfg.last_sync).replace('T', ' ').slice(0, 16);
+    statusHtml = '<div class="sync-status-row ' + (ok ? 'ok' : 'err') + '">' +
+      (ok ? '✅' : '❌') + ' 上次同步 ' + escHtml(timeStr) +
+      (cfg.last_message ? '<div class="sync-msg">' + escHtml(String(cfg.last_message).slice(0, 300)) + '</div>' : '') +
+    '</div>';
+  } else {
+    statusHtml = '<div class="sync-status-row muted">尚未同步过</div>';
+  }
+  document.getElementById('syncDialogStatus').innerHTML = statusHtml;
+  document.getElementById('syncDialogTitle').textContent = '自动同步 · ' + owner + '/' + name;
+  document.getElementById('syncDialog').style.display = 'flex';
+}
+
+function closeSyncDialog() {
+  document.getElementById('syncDialog').style.display = 'none';
+}
+
+async function saveSyncConfig() {
+  const val = document.getElementById('syncIntervalSelect').value;
+  const {owner, name} = _syncDialogCtx;
+  const enabled = val !== 'off';
+  const interval = enabled ? val : '1d';
+  try {
+    const r = await fetch('/api/repos/sync_config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, name: name, enabled: enabled, interval: interval})
+    });
+    const j = await r.json();
+    if (j.error) { alert('保存失败: ' + j.error); return; }
+    closeSyncDialog();
+    await loadSyncStatus();
+    loadRepos();
+  } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+async function forkAnyRepo() {
+  const url = prompt('Fork 别人的 GitHub 仓库到我的账号\n\n输入源仓库地址，支持：\n  https://github.com/owner/repo\n  owner/repo\n\nFork 后可以点「克隆」拉到 NAS。');
+  if (!url || !url.trim()) return;
+  openModal('Fork 仓库', '正在创建任务...');
+  try {
+    const r = await fetch('/api/git/fork', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url.trim()})
+    });
+    const j = await r.json();
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+    document.getElementById('modalTitle').textContent = 'Fork ' + j.source + ' → ' + j.target;
+    pollTask(j.task_id, function(t) {
+      if (t.status === 'success' && t.extras) {
+        renderLog('✅ Fork 完成\n\n源仓库：' + (t.extras.source_url || '') +
+                  '\n你的副本：' + (t.extras.repo_url || '') +
+                  '\n\n提示：仓库刚创建可能需要几秒同步。');
+      }
+    });
+  } catch (e) { renderLog('请求失败: ' + e.message); }
+}
+
+async function ensureSysInfo() {
+  if (_sysInfo) return _sysInfo;
+  try {
+    const r = await fetch('/api/system/info');
+    _sysInfo = await r.json();
+  } catch (e) { _sysInfo = {work_dir: '', nas_dir: '', nas_enabled: false}; }
+  return _sysInfo;
+}
+
+async function cloneRepo(owner, name, branch) {
+  const sys = await ensureSysInfo();
+  const defaultRel = '/work/clones/' + owner + '/' + name;
+  let tip = '克隆 ' + owner + '/' + name + ' 到 NAS\n\n输入目标路径：\n  ' + defaultRel + '\n';
+  if (sys.nas_enabled) {
+    tip += '  /nas/项目/' + name + '  → ' + sys.nas_dir + '/项目/' + name + '\n';
+  }
+  tip += '  或相对路径  → 自动放 /work 下\n\n容器 /work → NAS: ' + (sys.work_dir || '未配置') + '\n';
+  if (sys.nas_enabled) tip += '容器 /nas  → NAS: ' + sys.nas_dir + '\n';
+  const input = prompt(tip, defaultRel);
+  if (input === null) return;
+  const subpath = input.trim();
+  openModal('克隆 ' + owner + '/' + name, '正在创建任务...');
+  try {
+    const r = await fetch('/api/repos/clone', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, name: name, branch: branch, subpath: subpath})
+    });
+    const j = await r.json();
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+    pollTask(j.task_id, function(t) {
+      if (t.status === 'success' && t.extras && t.extras.host_path) {
+        renderLog('✅ 克隆完成\n\nNAS 路径：\n' + t.extras.host_path);
+      }
+    });
+  } catch (e) { renderLog('请求失败: ' + e.message); }
+}
+
+function pollTask(tid, onDone) {
+  if (_pollTimers[tid]) return;
+  async function step() {
+    try {
+      const r = await fetch('/api/task/' + tid);
+      const j = await r.json();
+      if (!j.task) return;
+      if (j.task.step) renderSteps(j.task.step, j.task.status);
+      if (j.task.status === 'running' || j.task.status === 'pending') {
+        _pollTimers[tid] = setTimeout(step, 1500);
+      } else {
+        delete _pollTimers[tid];
+        renderLog('状态: ' + (j.task.status === 'success' ? '成功' : '失败') + '\n\n' + (j.log || ''));
+        if (onDone) onDone(j.task);
+      }
+    } catch (e) { _pollTimers[tid] = setTimeout(step, 2500); }
+  }
+  _pollTimers[tid] = setTimeout(step, 200);
+}
+
+async function showReleases(owner, repo) {
+  _releasesCtx = {owner: owner, repo: repo, accel_base: ''};
+  openModal('版本历史 - ' + owner + '/' + repo, '加载中...');
+  try {
+    const r = await fetch('/api/repos/releases?owner=' + encodeURIComponent(owner) + '&repo=' + encodeURIComponent(repo));
+    const j = await r.json();
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+    _releasesCtx.accel_base = j.accel_base || '';
+    renderReleases(j.releases || []);
+  } catch (e) { renderLog('加载失败: ' + e.message); }
+}
+
+function renderReleases(list) {
+  const el = document.getElementById('modalLog');
+  el.style.display = 'block';
+  const fl = document.getElementById('modalFileList');
+  if (fl) fl.style.display = 'none';
+  if (!list.length) {
+    el.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:#8b9cba">还没有任何 Release</div>';
+    return;
+  }
+  let html = '<div class="release-list">';
+  list.forEach(function(rel, idx) {
+    const pre = rel.prerelease ? '<span class="release-badge pre">预发布</span>' : '';
+    const latest = (idx === 0 && !rel.prerelease) ? '<span class="release-badge latest">latest</span>' : '';
+    html += '<div class="release-item"><div class="release-head">' +
+      '<span class="release-tag">' + escHtml(rel.tag) + '</span>' +
+      '<span class="release-time">' + escHtml(rel.published) + '</span>' + latest + pre + '</div>';
+    if (rel.body) html += '<div class="release-body">' + escHtml(rel.body) + '</div>';
+    if (rel.assets && rel.assets.length) {
+      html += '<div class="release-assets">';
+      rel.assets.forEach(function(a) {
+        let url = a.url;
+        if (_releasesCtx.accel_base) url = _releasesCtx.accel_base + '/' + a.url;
+        html += '<div class="asset-row"><a href="' + escHtml(url) + '" target="_blank" rel="noopener">' + escHtml(a.name) + '</a>' +
+                '<span class="asset-meta">' + fmtBytes(a.size) + ' · 下载 ' + (a.downloads || 0) + ' 次</span></div>';
+      });
+      html += '</div>';
+    }
+    html += '<div class="release-actions">' +
+      '<a class="btn-link" href="' + escHtml(rel.url) + '" target="_blank" rel="noopener">GitHub 查看</a>' +
+      '<button type="button" class="rollback" onclick="rollbackTo(\'' + jsStr(rel.tag) + '\')">回滚到此版本</button>' +
+      '</div></div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function rollbackTo(tag) {
+  const owner = _releasesCtx.owner, repo = _releasesCtx.repo;
+  const input = prompt('⚠️ 回滚会把 ' + owner + '/' + repo + ' 的 main 分支强制覆盖为 ' + tag + ' 的代码\n历史提交会丢失\n\n请输入「' + tag + '」确认：');
+  if (input !== tag) { alert('已取消'); return; }
+  try {
+    const r = await fetch('/api/repos/rollback', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, name: repo, tag: tag})
+    });
+    const j = await r.json();
+    if (j.error) { alert('失败: ' + j.error); return; }
+    openModal('回滚 ' + owner + '/' + repo + ' 到 ' + tag, '正在回滚...');
+    pollTask(j.task_id, function(t) {
+      if (t.status === 'success') renderLog('✅ 回滚完成\n\n仓库：' + (t.extras && t.extras.repo_url ? t.extras.repo_url : ''));
+      else renderLog('❌ 回滚失败\n\n' + (t.result || ''));
+    });
+  } catch (e) { alert('请求失败: ' + e.message); }
+}
+
+
+var _readmeCtx = {owner: '', repo: '', branch: 'main', readme_sha: '', readme_exists: false, current: ''};
+
+async function generateReadme(owner, repo, branch) {
+  _readmeCtx = {owner: owner, repo: repo, branch: branch || 'main', readme_sha: '', readme_exists: false, current: ''};
+
+  // 先问描述（可选，回车用默认）
+  var desc = prompt(
+    '生成 README：' + owner + '/' + repo + '\n\n' +
+    '可以填一句话简介（留空则用仓库已有的描述）：',
+    ''
+  );
+  if (desc === null) return;
+
+  document.getElementById('readmeTitle').textContent = '生成 README · ' + owner + '/' + repo;
+  document.getElementById('readmeInfo').textContent = '生成中...';
+  document.getElementById('readmeTextarea').value = '';
+  document.getElementById('readmeDialog').style.display = 'flex';
+
+  try {
+    var r = await fetch('/api/repos/generate_readme', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({owner: owner, repo: repo, description: desc, branch: _readmeCtx.branch})
+    });
+    var j = await r.json();
+    if (j.error) {
+      document.getElementById('readmeInfo').textContent = '❌ ' + j.error;
+      return;
+    }
+    _readmeCtx.readme_sha = j.readme_sha || '';
+    _readmeCtx.readme_exists = !!j.readme_exists;
+    _readmeCtx.current = j.markdown || '';
+    document.getElementById('readmeTextarea').value = j.markdown || '';
+    var info = '📊 共 ' + j.files_count + ' 个文件 · ' +
+      (j.readme_exists ? '⚠️ 已有 README，保存会覆盖' : '✅ 无 README，将新建');
+    document.getElementById('readmeInfo').textContent = info;
+  } catch (e) {
+    document.getElementById('readmeInfo').textContent = '❌ 请求失败: ' + e.message;
+  }
+}
+
+function closeReadmeDialog() {
+  document.getElementById('readmeDialog').style.display = 'none';
+}
+
+async function regenerateReadme() {
+  if (!_readmeCtx.owner) return;
+  var cur = document.getElementById('readmeTextarea').value;
+  if (cur !== _readmeCtx.current) {
+    if (!confirm('当前内容已被修改，重新生成会丢失这些修改。继续？')) return;
+  }
+  await generateReadme(_readmeCtx.owner, _readmeCtx.repo, _readmeCtx.branch);
+}
+
+async function saveReadmeToRepo() {
+  var content = document.getElementById('readmeTextarea').value;
+  if (!content.trim()) {
+    alert('内容为空，不保存');
+    return;
+  }
+  var exists = _readmeCtx.readme_exists;
+  var msg = prompt(
+    exists ? 'README.md 已存在，保存会覆盖它。\n\n填写 commit message：'
+           : '新建 README.md。\n\n填写 commit message：',
+    exists ? 'update README.md' : 'add README.md'
+  );
+  if (msg === null) return;
+  if (!msg.trim()) msg = exists ? 'update README.md' : 'add README.md';
+
+  var btn = document.getElementById('readmeSaveBtn');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+
+  try {
+    var r = await fetch('/api/repos/save_file', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        owner: _readmeCtx.owner,
+        repo: _readmeCtx.repo,
+        path: 'README.md',
+        content: content,
+        sha: _readmeCtx.readme_sha,
+        message: msg.trim()
+      })
+    });
+    var j = await r.json();
+    if (j.error) {
+      alert('保存失败: ' + j.error);
+      return;
+    }
+    var tip = '✅ 已保存';
+    if (j.commit_url) tip += '\n\n' + j.commit_url;
+    alert(tip);
+    closeReadmeDialog();
+    loadRepos();
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存到仓库';
+  }
+}
+
+async function deleteRepo(owner, name) {
+  const input = prompt('⚠️ 删除仓库不可恢复！\n\n请输入仓库名称「' + name + '」确认删除：');
+  if (input !== name) { alert('名称不匹配，已取消'); return; }
+  const r = await fetch('/api/repos/delete', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({owner: owner, name: name})
+  });
+  const j = await r.json();
+  if (j.error) { alert('删除失败: ' + j.error); return; }
+  alert('已删除 ' + owner + '/' + name);
+  loadRepos();
+}
+
+async function renameRepo(owner, name) {
+  const newName = prompt('重命名 ' + owner + '/' + name + '\n\n新名称：', name);
+  if (!newName || newName === name) return;
+  const r = await fetch('/api/repos/rename', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({owner: owner, name: name, new_name: newName})
+  });
+  const j = await r.json();
+  if (j.error) { alert('重命名失败: ' + j.error); return; }
+  alert('已重命名为 ' + newName);
+  loadRepos();
+}
+
+async function toggleArchive(owner, name, archived) {
+  const act = archived ? '归档' : '取消归档';
+  if (!confirm(act + '仓库 ' + owner + '/' + name + '？\n\n（归档后仓库变为只读）')) return;
+  const r = await fetch('/api/repos/archive', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({owner: owner, name: name, archived: archived})
+  });
+  const j = await r.json();
+  if (j.error) { alert(act + '失败: ' + j.error); return; }
+  alert('已' + act);
+  loadRepos();
+}
+
+function newVersion(owner, repo) {
+  window.location.href = '/?update=' + encodeURIComponent(owner + '/' + repo);
+}
+
+window.onModalBack = function() {
+  if (fileCtx.owner && fileCtx.repo) loadFiles(fileCtx.path);
+};
+
+function viewFiles(owner, repo, branch, isPrivate) {
+  fileCtx = {owner: owner, repo: repo, path: '', branch: branch || 'main', accel_base: '', isPrivate: !!isPrivate};
+  openModal('文件 - ' + owner + '/' + repo, '加载中...');
+  loadFiles('');
+}
+
+async function loadFiles(path) {
+  fileCtx.path = path;
+  showFileLoading();
+  try {
+    const r = await fetch('/api/repos/contents?owner=' + encodeURIComponent(fileCtx.owner) +
+                          '&repo=' + encodeURIComponent(fileCtx.repo) +
+                          '&path=' + encodeURIComponent(path));
+    const j = await r.json();
+    if (j.empty_repo) { renderEmptyRepo(fileCtx.owner, fileCtx.repo); return; }
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+    fileCtx.accel_base = j.accel_base || '';
+    renderFileList(path, j.items || []);
+  } catch (e) { renderLog('加载失败: ' + e.message); }
+}
+
+async function viewFileContent(path) {
+  showBackBtn(true);
+  showEditBtn(false);
+  showFileLoading();
+  try {
+    const r = await fetch('/api/repos/file?owner=' + encodeURIComponent(fileCtx.owner) +
+                          '&repo=' + encodeURIComponent(fileCtx.repo) +
+                          '&path=' + encodeURIComponent(path));
+    const j = await r.json();
+    if (j.error) { renderLog('错误: ' + j.error); return; }
+    const header = '📄 ' + j.path + '  (' + j.size + ' B)\n' + '─'.repeat(50) + '\n\n';
+    renderLog(header + j.content);
+    // 保存状态给编辑功能用
+    window._lastFileData = {
+      owner: fileCtx.owner,
+      repo: fileCtx.repo,
+      path: j.path,
+      sha: j.sha || '',
+      content: j.content || ''
+    };
+    window._reloadPreview = function() {
+      viewFileContent(path);
+    };
+    showEditBtn(true);
+    showHistoryBtn(true);
+  } catch (e) { renderLog('加载失败: ' + e.message); }
+}
+
+function downloadFile(path) {
+  const fileName = path.split('/').pop();
+  if (fileCtx.isPrivate) {
+    const url = '/api/repos/download?owner=' + encodeURIComponent(fileCtx.owner) +
+                '&repo=' + encodeURIComponent(fileCtx.repo) + '&path=' + encodeURIComponent(path);
+    triggerDownload(url, fileName);
+    return;
+  }
+  const orig = 'https://github.com/' + encodeURIComponent(fileCtx.owner) + '/' +
+               encodeURIComponent(fileCtx.repo) + '/raw/' +
+               encodeURIComponent(fileCtx.branch) + '/' +
+               path.split('/').map(encodeURIComponent).join('/');
+  const url = fileCtx.accel_base ? (fileCtx.accel_base + '/' + orig) : orig;
+  triggerDownload(url, fileName);
+}
+
+function triggerDownload(url, fileName) {
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function showFileLoading() {
+  if (typeof showEditBtn === 'function') showEditBtn(false);
+  if (typeof showHistoryBtn === 'function') showHistoryBtn(false);
+  document.getElementById('modalLog').style.display = 'block';
+  document.getElementById('modalFileList').style.display = 'none';
+  renderLog('加载中...');
+}
+
+function renderFileList(path, items) {
+  showBackBtn(false);
+  if (typeof showEditBtn === 'function') showEditBtn(false);
+  if (typeof showHistoryBtn === 'function') showHistoryBtn(false);
+  if (typeof showHistoryBtn === 'function') showHistoryBtn(false);
+  const log = document.getElementById('modalLog');
+  const list = document.getElementById('modalFileList');
+  log.style.display = 'none';
+  list.style.display = 'block';
+  let html = '';
+  if (path) {
+    html += '<div class="fitem back" onclick="loadFiles(\'\')"><span class="ficon">⬆</span><span class="fname">返回上级</span></div>';
+  }
+  if (!items.length) {
+    html += '<div class="empty">(空目录)</div>';
+  } else {
+    items.forEach(function(it) {
+      const icon = it.type === 'dir' ? '📁' : '📄';
+      const size = it.type === 'file' ? '<span class="fsize">' + it.size + ' B</span>' : '';
+      const cls = it.type === 'dir' ? 'fitem dir' : 'fitem';
+      const handler = it.type === 'dir' ? 'loadFiles(\'' + jsStr(it.path) + '\')' : 'viewFileContent(\'' + jsStr(it.path) + '\')';
+      let dlBtn = '';
+      if (it.type === 'file') {
+        const accelTitle = fileCtx.accel_base ? '加速下载' : '下载';
+        dlBtn = '<button class="fdl" type="button" title="' + accelTitle + '" onclick="event.stopPropagation(); downloadFile(\'' + jsStr(it.path) + '\')">⬇</button>';
+      }
+      html += '<div class="' + cls + '" onclick="' + handler + '">' +
+              '<span class="ficon">' + icon + '</span>' +
+              '<span class="fname">' + escHtml(it.name) + '</span>' + size + dlBtn + '</div>';
+    });
+  }
+  list.innerHTML = html;
+}
+
+function renderEmptyRepo(owner, repo) {
+  showBackBtn(false);
+  const log = document.getElementById('modalLog');
+  const list = document.getElementById('modalFileList');
+  log.style.display = 'none';
+  list.style.display = 'block';
+  list.innerHTML = '<div class="empty" style="padding:32px 20px;line-height:2">' +
+    '<div style="font-size:32px;margin-bottom:12px">📭</div>' +
+    '<div style="font-size:14px;color:#cbd5e1;margin-bottom:8px">仓库是空的</div>' +
+    '<div style="font-size:12.5px;color:#8b9cba">' + escHtml(owner) + '/' + escHtml(repo) +
+    ' 还没有任何提交。<br>回首页发一次代码就有了。</div></div>';
+}
+
+document.addEventListener('DOMContentLoaded', loadRepos);
+</script>
+{% endblock %}

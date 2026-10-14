@@ -1,0 +1,20 @@
+name: Build Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t test-build .
+          else
+            echo "No Dockerfile, skip"
+          fi

@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+{% block title %}发布{% endblock %}
+{% block body %}
+{% if not has_token %}
+<div class="msg err">还没配置 GitHub Token，请先到 <a href="{{ url_for('setup') }}">设置</a>。</div>
+{% endif %}
+
+<div class="card">
+  <h2><span class="dot"></span>发布项目</h2>
+  <form id="pubForm" enctype="multipart/form-data">
+    <div class="row">
+      <div>
+        <label>项目名称（只允许字母数字 - _ .）</label>
+        <input type="text" name="repo_name" id="repoNameInput" required placeholder="my-project" autocomplete="off">
+      </div>
+      <div>
+        <label>可见性</label>
+        <select name="visibility">
+          <option value="private">私有（仅自己可见）</option>
+          <option value="public">公开（所有人可见）</option>
+        </select>
+        <div class="hint">私有仓库仅自己可见；公开仓库所有人可见，免费账户支持 GitHub Pages。</div>
+      </div>
+    </div>
+    <div id="profileHint" class="hint" style="display:none;margin-top:8px;color:#60a5fa">
+      💡 检测到上次发布过这个项目，已自动填充配置
+    </div>
+    <label>项目描述（可选）</label>
+    <input type="text" name="description" placeholder="一句话简介">
+    <label>分支</label>
+    <input type="text" name="branch" value="main">
+    <label>源码包（支持 .zip / .tar.gz / .tgz / .tar）</label>
+    <input type="file" name="source_file" required>
+    <div class="hint">不限制文件类型，请自行确认是受支持的压缩格式。</div>
+    <label>README.md 内容（可选，会覆盖包内 README）</label>
+    <textarea name="readme" id="readmeInput" placeholder="# 项目名&#10;&#10;简介..."></textarea>
+    <details id="readmePreviewWrap" style="display:none">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12.5px;margin-top:8px">👁 预览 Markdown</summary>
+      <div class="md-preview" id="readmePreview"></div>
+    </details>
+    <div class="row">
+      <div>
+        <label>Tag / 版本（可选，填了才会创建 Release）</label>
+        <input type="text" name="tag" placeholder="v1.0.0">
+      </div>
+      <div>
+        <label>Release 说明（可选）</label>
+        <input type="text" name="release_notes" placeholder="本次更新内容...">
+      </div>
+    </div>
+    <details id="tplSection" style="margin-top:16px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:13px">📦 发布模板（可选）</summary>
+      <div style="padding:12px 0">
+        <div class="row">
+          <div>
+            <label>.gitignore（告诉 git 哪些文件不提交）</label>
+            <select name="tpl_gitignore">
+              <option value="none">不添加</option>
+              <option value="generic">通用（忽略日志、临时文件、编辑器缓存）</option>
+              <option value="node">Node.js（忽略 node_modules、dist、.env）</option>
+              <option value="python">Python（忽略 __pycache__、venv、.pytest_cache）</option>
+              <option value="go">Go（忽略编译产物、vendor）</option>
+              <option value="java">Java（忽略 class、target、.gradle）</option>
+              <option value="docker">Docker（忽略 .env、日志、override 文件）</option>
+            </select>
+          </div>
+          <div>
+            <label>License（开源许可证）</label>
+            <select name="tpl_license">
+              <option value="none">不添加</option>
+              <option value="mit">MIT（最宽松，随便用，保留版权声明）</option>
+              <option value="apache">Apache 2.0（宽松，含专利授权）</option>
+              <option value="gpl3">GPL 3.0（传染性，衍生作品必须开源）</option>
+            </select>
+          </div>
+        </div>
+        <label>GitHub Actions 工作流（提交后自动跑检测）</label>
+        <select name="tpl_actions">
+          <option value="none">不添加</option>
+          <option value="docker">Dockerfile 语法检测（push 后跑一次 docker build 验证能不能构建，不推送镜像）</option>
+          <option value="test-python">Python 自动测试（push 后跑 pytest，需要有测试文件）</option>
+          <option value="test-node">Node 自动测试（push 后跑 npm test，需要有测试脚本）</option>
+        </select>
+        <div class="hint">模板文件会自动生成并加入源码后推送。若已存在同名文件会覆盖。<br>注意：Actions 只在 GitHub 服务器上跑检测，不会真的产出可下载的镜像或推送到镜像仓库。</div>
+      </div>
+    </details>
+
+    <div class="checkbox-row" style="margin-top:14px">
+      <input type="checkbox" name="readme_auto" id="readmeAuto" checked>
+      <label for="readmeAuto">若上方 README 留空，自动从 zip 中读取 README.md</label>
+    </div>
+
+    <label>发布资产（可选，多选，上传到 Release）</label>
+    <input type="file" name="assets" multiple>
+    <div class="checkbox-row">
+      <input type="checkbox" name="deploy_pages" id="dp">
+      <label for="dp">同时部署 GitHub Pages（需公开仓库）</label>
+    </div>
+    <button type="submit" id="pubBtn">开始发布</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2><span class="dot"></span>部署发布页（独立）</h2>
+  <form id="pagesForm" enctype="multipart/form-data">
+    <label>项目名称</label>
+    <input type="text" name="repo_name" required>
+    <label>发布页压缩包（根目录需含 index.html）</label>
+    <input type="file" name="pages_file" required>
+    <button type="submit" id="pagesBtn">部署 Pages</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2><span class="dot"></span>最近任务 <a href="{{ url_for('tasks') }}" style="margin-left:auto;font-size:12px;font-weight:400">查看全部 →</a></h2>
+  {% if recent %}
+    {% set _sm = {"pending":"待执行","running":"运行中","success":"成功","failed":"失败","interrupted":"已中断"} %}
+    {% for t in recent %}
+    <div class="task-item">
+      <span class="badge {{ t.status }}">{{ _sm.get(t.status, t.status) }}</span>
+      <span class="name">{{ t.name }}</span>
+      <span class="time">{{ t.created }}</span>
+      <span class="actions">
+        <button class="ghost" type="button" onclick="viewLog('{{ t.id }}', '{{ t.name }}')">日志</button>
+      </span>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">暂无任务</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/marked@12.0.2/marked.min.js';document.head.appendChild(s);"></script>
+<script>
+const STATUS_CN = {pending:'待执行',running:'运行中',success:'成功',failed:'失败',interrupted:'已中断'};
+let curTask = null;
+let polling = false;
+
+function uploadForm(form, url) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData(form);
+    const xhr = new XMLHttpRequest();
+    const startTime = Date.now();
+    xhr.open('POST', url);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        showUploadProgress(e.loaded, e.total, startTime);
+      }
+    };
+    xhr.upload.onload = () => {
+      showUploadProgress(1, 1, startTime);
+    };
+    xhr.onload = () => {
+      try {
+        resolve({status: xhr.status, data: JSON.parse(xhr.responseText)});
+      } catch (err) {
+        reject(new Error('响应解析失败: ' + xhr.responseText.slice(0, 200)));
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络错误'));
+    xhr.send(fd);
+  });
+}
+
+async function submitForm(form, url, btnId, title) {
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+
+  openModal(title || '任务日志', '准备上传...\n');
+  curTask = null;
+  polling = false;
+
+  try {
+    const res = await uploadForm(form, url);
+    const j = res.data;
+    hideUploadProgress();
+    if (j.error) {
+      renderLog('错误: ' + j.error);
+      return;
+    }
+    curTask = j.task_id;
+    renderLog('任务已创建: ' + curTask + '\n\n正在启动任务...');
+    poll();
+  } catch (e) {
+    hideUploadProgress();
+    renderLog('提交失败: ' + e.message + '\n\n如果文件很大，上传可能需要一些时间。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function poll() {
+  if (!curTask) return;
+  if (polling) return;
+  polling = true;
+  try {
+    const r = await fetch('/api/task/' + curTask);
+    const j = await r.json();
+    if (j.task) {
+      renderLog('状态: ' + (STATUS_CN[j.task.status] || j.task.status) + '\n\n' + (j.log || ''));
+      if (j.task.step !== undefined) renderSteps(j.task.step, j.task.status);
+      if (j.task.status === 'running' || j.task.status === 'pending') {
+        setTimeout(() => { polling = false; poll(); }, 1500);
+      } else {
+        polling = false;
+        if (j.task.status === 'success' && j.task.extras) {
+          renderExtras(j.task.extras);
+        }
+      }
+    } else {
+      polling = false;
+    }
+  } catch (e) {
+    setTimeout(() => { polling = false; poll(); }, 2500);
+  }
+}
+
+async function viewLog(tid, name) {
+  openModal('日志 - ' + name, '加载中...');
+  try {
+    const r = await fetch('/api/task/' + tid);
+    const j = await r.json();
+    if (j.task) {
+      renderLog('状态: ' + (STATUS_CN[j.task.status] || j.task.status) + '\n\n' + (j.log || ''));
+      if (j.task.step !== undefined) renderSteps(j.task.step, j.task.status);
+      if (j.task.status === 'success' && j.task.extras) {
+        renderExtras(j.task.extras);
+      }
+    }
+  } catch (e) {
+    renderLog('加载失败: ' + e.message);
+  }
+}
+
+// ===== A1: 项目配置记忆 =====
+let profilesCache = null;
+
+async function loadProfiles() {
+  try {
+    const r = await fetch('/api/profiles');
+    const j = await r.json();
+    profilesCache = j.profiles || {};
+  } catch (e) { profilesCache = {}; }
+}
+
+function applyProfile(name) {
+  if (!profilesCache || !name) return;
+  const p = profilesCache[name];
+  if (!p) {
+    document.getElementById('profileHint').style.display = 'none';
+    return;
+  }
+  const form = document.getElementById('pubForm');
+  if (p.visibility) form.querySelector('[name=visibility]').value = p.visibility;
+  if (p.branch !== undefined) form.querySelector('[name=branch]').value = p.branch || 'main';
+  if (p.description !== undefined) form.querySelector('[name=description]').value = p.description || '';
+  if (p.tag !== undefined) form.querySelector('[name=tag]').value = p.tag || '';
+  if (p.deploy_pages !== undefined) form.querySelector('[name=deploy_pages]').checked = !!p.deploy_pages;
+  if (p.tpl_gitignore) form.querySelector('[name=tpl_gitignore]').value = p.tpl_gitignore;
+  if (p.tpl_license) form.querySelector('[name=tpl_license]').value = p.tpl_license;
+  if (p.tpl_actions) form.querySelector('[name=tpl_actions]').value = p.tpl_actions;
+  if (p.readme_auto !== undefined) form.querySelector('[name=readme_auto]').checked = !!p.readme_auto;
+  const hint = document.getElementById('profileHint');
+  hint.style.display = 'block';
+  hint.textContent = '💡 检测到上次发布过「' + name + '」，已自动填充配置';
+}
+
+// ===== A2: 发布前预检 =====
+async function runPrecheck(form) {
+  const fd = new FormData(form);
+  const src = form.querySelector('[name=source_file]').files[0];
+  const assets = form.querySelector('[name=assets]').files;
+  let assetSize = 0;
+  for (let i = 0; i < assets.length; i++) assetSize = Math.max(assetSize, assets[i].size);
+
+  const payload = {
+    repo_name: fd.get('repo_name') || '',
+    visibility: fd.get('visibility') || 'private',
+    deploy_pages: fd.get('deploy_pages') === 'on',
+    source_size: src ? src.size : 0,
+    asset_size: assetSize
+  };
+  const r = await fetch('/api/precheck', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  return await r.json();
+}
+
+function formatPrecheck(j) {
+  let msg = '';
+  if (j.errors && j.errors.length) {
+    msg += '❌ 错误：\n' + j.errors.map(e => '  • ' + e).join('\n') + '\n\n';
+  }
+  if (j.warnings && j.warnings.length) {
+    msg += '⚠️ 提醒：\n' + j.warnings.map(w => '  • ' + w.msg).join('\n') + '\n\n';
+  }
+  return msg;
+}
+
+document.getElementById('pubForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target;
+  try {
+    const j = await runPrecheck(form);
+    if (j.errors && j.errors.length) {
+      alert(formatPrecheck(j) + '请修正后重试。');
+      return;
+    }
+    if (j.warnings && j.warnings.length) {
+      if (!confirm(formatPrecheck(j) + '继续发布？')) return;
+    }
+  } catch (err) {
+    // 预检失败不阻塞
+  }
+  submitForm(form, '/api/publish', 'pubBtn', '任务日志 - 发布项目');
+});
+
+document.getElementById('pagesForm').addEventListener('submit', e => {
+  e.preventDefault();
+  submitForm(e.target, '/api/pages', 'pagesBtn', '任务日志 - 部署 Pages');
+});
+
+// ===== A4: README 实时预览 =====
+function renderReadmePreview() {
+  const wrap = document.getElementById('readmePreviewWrap');
+  const src = document.getElementById('readmeInput').value;
+  const out = document.getElementById('readmePreview');
+  if (!src.trim()) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  if (typeof marked !== 'undefined') {
+    out.innerHTML = marked.parse(src);
+  } else {
+    out.textContent = src;
+  }
+}
+
+// ===== 初始化 =====
+async function autoFillFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const update = params.get('update');
+  if (!update) return;
+  const parts = update.split('/');
+  if (parts.length !== 2) return;
+  const owner = parts[0], repo = parts[1];
+  const nameInput = document.getElementById('repoNameInput');
+  nameInput.value = repo;
+  nameInput.scrollIntoView({behavior: 'smooth', block: 'center'});
+  try {
+    const r = await fetch('/api/repos/info?owner=' + encodeURIComponent(owner) +
+                          '&repo=' + encodeURIComponent(repo));
+    const j = await r.json();
+    if (j.error) return;
+    const form = document.getElementById('pubForm');
+    form.querySelector('[name=visibility]').value = j.private ? 'private' : 'public';
+    form.querySelector('[name=description]').value = j.description || '';
+    form.querySelector('[name=branch]').value = j.branch || 'main';
+    const hint = document.getElementById('profileHint');
+    hint.style.display = 'block';
+    hint.style.color = '#fbbf24';
+    hint.textContent = '⬆ 正在更新项目 ' + owner + '/' + repo + '，配置已自动填充';
+    window.history.replaceState({}, '', '/');
+  } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', async function() {
+  await loadProfiles();
+  await autoFillFromUrl();
+
+  const nameInput = document.getElementById('repoNameInput');
+  if (nameInput) {
+    nameInput.addEventListener('blur', function() {
+      applyProfile(this.value.trim());
+    });
+    nameInput.addEventListener('input', function() {
+      if (!this.value) document.getElementById('profileHint').style.display = 'none';
+    });
+  }
+
+  const readme = document.getElementById('readmeInput');
+  if (readme) {
+    readme.addEventListener('input', renderReadmePreview);
+  }
+});
+</script>
+{% endblock %}

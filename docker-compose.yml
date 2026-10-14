@@ -1,0 +1,19 @@
+services:
+  gh-web:
+    build: .
+    image: gh-web:latest
+    container_name: gh-web
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-5110}:8080"
+    volumes:
+      - ${NAS_DATA_DIR:-./data}:/data
+      - ${NAS_WORK_DIR:-./work}:/work
+      - ${NAS_EXTRA_DIR:-./data/empty}:/nas
+    environment:
+      - TZ=Asia/Shanghai
+      - DATA_DIR=/data
+      - WORK_DIR=/work
+      - HOST_WORK_DIR=${NAS_WORK_DIR:-/work}
+      - HOST_NAS_DIR=${NAS_EXTRA_DIR:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}

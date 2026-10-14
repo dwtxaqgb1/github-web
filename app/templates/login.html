@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}登录{% endblock %}
+{% block body %}
+<div class="card" style="max-width:380px;margin:80px auto">
+  <h2>登录</h2>
+  {% if err %}<div class="msg err">{% if locked %}🔒 {% endif %}{{ err }}</div>{% endif %}
+  <form method="post">
+    <label>密码</label>
+    <input type="password" name="password" autofocus required>
+    <button type="submit">登录</button>
+  </form>
+  <div class="hint">初始密码 admin123，登录后请到设置页修改。</div>
+</div>
+{% endblock %}

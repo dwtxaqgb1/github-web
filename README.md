@@ -45,8 +45,4 @@ over 443（绕过 github.com:443 丢包）
 - 能访问 GitHub（见下方 [SSH 
 部署](#-ssh-部署推荐)）
 ### 一键安装（推荐）
-```bash git clone 
-https://github.com/dwtxaqgb1/github-web.git 
-cd github-web chmod +x install.sh
-./install.sh
-
+```git clone https://github.com/dwtxaqgb1/github-web.git && cd github-web && chmod +x install.sh && ./install.sh
